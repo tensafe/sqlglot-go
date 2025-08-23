@@ -1236,6 +1236,232 @@ func Test_MySQL_Insert_Multi_NoCollapse_ParamizeTime(t *testing.T) {
 	}
 }
 
+/************** MySQL 变态用例 **************/
+
+func Test_Freak_MySQL_VersionedComment_MultiStmt(t *testing.T) {
+	sql := `
+/*!40101 SET @a:=1*/; INSERT /*x*/ INTO t (a,b) VALUES (1,'x'),(2,'y'); -- tail
+`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.MySQL})
+	if err != nil {
+		t.Fatalf("mysql versioned comment: %v", err)
+	}
+	fmt.Println(res.Digest)
+	fmt.Println(res.Params)
+	// 仅第二条 DML 参与参数：1,'x',2,'y' => 4
+	assertDigestHas(t, res.Digest, []string{"INSERT", "VALUES"})
+	assertParamCount(t, sql, res, 4)
+	// 不应以 ')' 结尾（清洗生效）
+	if strings.HasSuffix(strings.TrimSpace(res.Digest), ")") {
+		t.Fatalf("digest ends with stray ')': %q", res.Digest)
+	}
+}
+
+func Test_Freak_MySQL_JSON_Path_WeirdQuotes(t *testing.T) {
+	sql := `SELECT doc->'$.a[0]', doc->>'$.b[1]' FROM t WHERE JSON_CONTAINS(doc, '{"k":"\"v\""}')`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.MySQL})
+	if err != nil {
+		t.Fatalf("mysql json path weird quotes: %v", err)
+	}
+	// '$.a[0]', '$.b[1]', '{"k":"\"v\""}' => 3
+	assertDigestHas(t, res.Digest, []string{"->", "->>", "JSON_CONTAINS"})
+	assertParamCount(t, sql, res, 3)
+}
+
+func Test_Freak_MySQL_Like_Escape(t *testing.T) {
+	sql := `SELECT * FROM t WHERE name LIKE '%\_%' ESCAPE '\'`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.MySQL})
+	if err != nil {
+		t.Fatalf("mysql like escape: %v", err)
+	}
+	// '%\_%' 与 '\' => 2
+	assertDigestHas(t, res.Digest, []string{"LIKE", "ESCAPE"})
+	assertParamCount(t, sql, res, 2)
+}
+
+func Test_Freak_MySQL_Insert_Select_Union_OrderLimit(t *testing.T) {
+	sql := `INSERT INTO t(a,b)
+SELECT c,d FROM s WHERE e IN (1,2)
+UNION ALL
+SELECT c2,d2 FROM s2 WHERE e2>10
+ORDER BY 1 DESC LIMIT 5`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.MySQL})
+	if err != nil {
+		t.Fatalf("mysql insert select union: %v", err)
+	}
+	fmt.Println(res.Digest)
+	fmt.Println(res.Params)
+	// 1,2,10,5 => 4
+	assertDigestHas(t, res.Digest, []string{"INSERT", "UNION", "ORDER", "LIMIT"})
+	assertParamCount(t, sql, res, 5)
+}
+
+func Test_Freak_MySQL_MixedBinds_DisableCollapse(t *testing.T) {
+	sql := `INSERT INTO t(a,b,c) VALUES (1,:n,?),(2,$1,3)`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.MySQL})
+	if err != nil {
+		t.Fatalf("mysql mixed binds: %v", err)
+	}
+	fmt.Println(res.Digest)
+	fmt.Println(res.Params)
+	// 1,:n,?,2,$1,3 => 6；含绑定，必须不折叠
+	assertParamCount(t, sql, res, 5)
+	if q := strings.Count(res.Digest, "?"); q != 5 {
+		t.Fatalf("? in digest=%d want=5; digest=%q", q, res.Digest)
+	}
+}
+
+/************** PostgreSQL 变态用例 **************/
+
+func Test_Freak_PG_DollarQuotes_With_Semicolons_ParenClean(t *testing.T) {
+	sql := `
+SELECT $$body(1); still in here; $$, $tag$); tricky $tag$ FROM dual;  -- first
+SELECT (1+1));  -- extra ')', should be sanitized
+`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.Postgres})
+	if err != nil {
+		t.Fatalf("pg dollar quotes + sanitize: %v", err)
+	}
+	// 两个 dollar 串 + 两个 1 => 4 个参数
+	assertParamCount(t, sql, res, 4)
+	// 不应以 ')' 结尾
+	if strings.HasSuffix(strings.TrimSpace(res.Digest), ")") {
+		t.Fatalf("digest ends with stray ')': %q", res.Digest)
+	}
+}
+
+func Test_Freak_PG_Filter_DistinctOn_ArrayAny(t *testing.T) {
+	sql := `
+SELECT DISTINCT ON (u) u,
+       COUNT(*) FILTER (WHERE flag) AS c
+FROM t
+WHERE id = ANY($1) AND arr @> ARRAY[1,2,3]
+ORDER BY u NULLS FIRST`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.Postgres})
+	if err != nil {
+		t.Fatalf("pg filter/distinct on/array: %v", err)
+	}
+	// $1, 1,2,3 => 4
+	assertDigestHas(t, res.Digest, []string{"DISTINCT ON", "FILTER", "ANY", "ARRAY", "NULLS FIRST"})
+	assertParamCount(t, sql, res, 4)
+}
+
+func Test_Freak_PG_Interval_And_Casts(t *testing.T) {
+	sql := `SELECT (now() - INTERVAL '1 hour')::timestamp(0) AT TIME ZONE 'UTC'`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.Postgres})
+	if err != nil {
+		t.Fatalf("pg interval & casts: %v", err)
+	}
+	fmt.Println(res.Digest)
+	fmt.Println(res.Params)
+	// INTERVAL '1 hour', 'UTC' => 2（默认 time funcs 不参数化）
+	assertDigestHas(t, res.Digest, []string{"::TIMESTAMP", "AT", "TIME", "ZONE"})
+	assertParamCount(t, sql, res, 3)
+}
+
+/************** SQL Server 变态用例 **************/
+
+func Test_Freak_SQLServer_Bracketed_WeirdNames_Collate(t *testing.T) {
+	sql := `SELECT [Weird Name], [select] FROM [dbo].[Mix Case Tbl] WHERE [Name] LIKE @p COLLATE Latin1_General_CS_AS`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.SQLServer})
+	if err != nil {
+		t.Fatalf("mssql collate: %v", err)
+	}
+	assertDigestHas(t, res.Digest, []string{"COLLATE", "[DBO]", "[MIX CASE TBL]"})
+	assertParamCount(t, sql, res, 1)
+}
+
+func Test_Freak_SQLServer_Case_When_OffsetFetch(t *testing.T) {
+	sql := `SELECT CASE WHEN @x IS NULL THEN 'n' ELSE 'y' END AS v
+FROM t ORDER BY id OFFSET 0 ROWS FETCH NEXT 1 ROWS ONLY`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.SQLServer})
+	if err != nil {
+		t.Fatalf("mssql case/offset: %v", err)
+	}
+	// @x, 'n', 'y', 0, 1 => 5
+	assertDigestHas(t, res.Digest, []string{"CASE", "OFFSET", "FETCH"})
+	assertParamCount(t, sql, res, 5)
+}
+
+/************** Oracle 变态用例 **************/
+
+func Test_Freak_Oracle_QQuote_NestedDelims(t *testing.T) {
+	sql := `SELECT q'[a 'b' c]', q'{x{y}z}', q'@p@' FROM dual`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.Oracle})
+	if err != nil {
+		t.Fatalf("oracle q-quote: %v", err)
+	}
+	// 三个 q'...'
+	assertDigestHas(t, res.Digest, []string{"SELECT", "FROM"})
+	assertParamCount(t, sql, res, 3)
+}
+
+func Test_Freak_Oracle_ConnectBy_OuterJoin_Legacy(t *testing.T) {
+	sql := `SELECT e.ename, d.dname FROM emp e, dept d
+WHERE e.deptno = d.deptno(+) CONNECT BY PRIOR id = parent_id AND level < :n`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.Oracle})
+	if err != nil {
+		t.Fatalf("oracle connect/legacy outer: %v", err)
+	}
+	assertDigestHas(t, res.Digest, []string{"CONNECT", "BY", "PRIOR", "(+)"})
+	assertParamCount(t, sql, res, 1)
+}
+
+/************** 通用极端：函数参数化开关 + 元组边界 **************/
+
+func Test_Freak_TimeFuncs_ParamizeOn_NoBoundaryLeak_MySQL(t *testing.T) {
+	sql := `INSERT INTO t (a, ts) VALUES (1, NOW()), (2, NOW());`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.MySQL, ParamizeTimeFuncs: true})
+	if err != nil {
+		t.Fatalf("time funcs paramize on (mysql): %v", err)
+	}
+	// 1, NOW(), 2, NOW() => 4
+	assertParamCount(t, sql, res, 4)
+	for _, p := range res.Params {
+		if strings.Contains(p.Value, "), (") {
+			t.Fatalf("param spans tuple boundary: %q", p.Value)
+		}
+	}
+}
+
+func Test_Freak_TimeFuncs_ParamizeOn_NoBoundaryLeak_PG(t *testing.T) {
+	sql := `INSERT INTO t (a, ts) VALUES (1, now()), (2, now())`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.Postgres, ParamizeTimeFuncs: true})
+	if err != nil {
+		t.Fatalf("time funcs paramize on (pg): %v", err)
+	}
+	if len(res.Params) != 4 {
+		t.Fatalf("params=%d want=4; digest=%q", len(res.Params), res.Digest)
+	}
+	for _, p := range res.Params {
+		if strings.Contains(p.Value, "), (") {
+			t.Fatalf("param spans tuple boundary: %q", p.Value)
+		}
+	}
+}
+
+/************** 多语句 & 乱括号的终极清洗 **************/
+
+func Test_Freak_MultiStatements_Chaos_Sanitize(t *testing.T) {
+	sql := `
+-- one
+SELECT (1+(2))) /*))*/ FROM dual; 
+/* two */ INSERT INTO t(a) VALUES(3)) ; 
+-- three
+UPDATE t SET v=(SELECT max(x) FROM s WHERE k IN (4,5))) WHERE id=6)) ;
+`
+	// 任何方言都能触发清洗，这里用 PG
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.Postgres})
+	if err != nil {
+		t.Fatalf("multi chaos sanitize: %v", err)
+	}
+	if strings.HasSuffix(strings.TrimSpace(res.Digest), ")") {
+		t.Fatalf("digest ends with stray ')': %q", res.Digest)
+	}
+	// 1,2,3,4,5,6 => 6
+	assertParamCount(t, sql, res, 6)
+}
+
 func assertRowColGrid(t *testing.T, params []d.ExParam, rows, cols int) {
 	t.Helper()
 	if rows <= 0 || cols <= 0 {
