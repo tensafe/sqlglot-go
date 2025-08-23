@@ -2,6 +2,8 @@ package sqldigest_antlr
 
 import (
 	"fmt"
+	"sort"
+	"strings"
 	ollex "tsql_digest_v4/internal/parsers/plsql"
 
 	"github.com/antlr4-go/antlr/v4"
@@ -28,12 +30,23 @@ type Options struct {
 }
 
 // ExParam 抽取到的参数
+//type ExParam struct {
+//	Index int
+//	Type  string // Number|String|Bool|Null|Date|Time|Timestamp|Interval|Bind|NamedBind
+//	Value string // 原文（未解码）
+//	Start int    // 原 SQL 的字节起点（含）
+//	End   int    // 原 SQL 的字节终点（不含）
+//}
+
 type ExParam struct {
 	Index int
-	Type  string // Number|String|Bool|Null|Date|Time|Timestamp|Interval|Bind|NamedBind
-	Value string // 原文（未解码）
-	Start int    // 原 SQL 的字节起点（含）
-	End   int    // 原 SQL 的字节终点（不含）
+	Type  string
+	Value string
+	Start int
+	End   int
+	// 新增：INSERT ... VALUES (...) , (...), ... 的行/列位置（1-based）
+	Row int // 第几行 VALUES 元组
+	Col int // 该行里的第几个参数（按出现顺序）
 }
 
 // Result 产物
@@ -74,5 +87,144 @@ func BuildDigestANTLR(sql string, opt Options) (Result, error) {
 
 	// 基于可见 token 渲染 digest 并抽参（原文+位置）
 	digest, params := renderAndExtract(sql, tokens.GetAllTokens(), opt)
+	// 新增：如是 INSERT ... VALUES(...)，为每个参数标上 Row/Col
+	annotateInsertRowCol(sql, opt.Dialect, &params)
 	return Result{Digest: digest, Params: params}, nil
+}
+
+// annotateInsertRowCol：若是 INSERT ... VALUES (...) , (...) ...，给每个参数打上 Row/Col
+func annotateInsertRowCol(original string, dialect Dialect, params *[]ExParam) {
+	if len(*params) == 0 {
+		return
+	}
+	// 先粗判一下：不是 INSERT/VALUES 就直接返回
+	up := strings.ToUpper(original)
+	if !strings.Contains(up, "INSERT") || !strings.Contains(up, "VALUES") {
+		return
+	}
+
+	// 重新词法（只看可见 token，拿到括号/逗号等精确信息）
+	is := antlr.NewInputStream(original)
+	var lexer antlr.Lexer
+	switch dialect {
+	case Postgres:
+		lexer = pglex.NewPostgreSQLLexer(is)
+	case MySQL:
+		lexer = mylex.NewMySQLLexer(is)
+	case SQLServer:
+		lexer = tsllex.NewTSqlLexer(is)
+	case Oracle:
+		lexer = ollex.NewPlSqlLexer(is)
+	default:
+		lexer = mylex.NewMySQLLexer(is)
+	}
+	
+	toks := antlr.NewCommonTokenStream(lexer, 0)
+	toks.Fill()
+	all := toks.GetAllTokens()
+
+	// 定位 VALUES 段；在 VALUES 之后按“顶层括号”切出每个元组的字节区间
+	type rng struct{ s, e int } // [s,e)
+	var ranges []rng
+
+	inValues := false
+	started := false
+	depth := 0
+	tupleStartRune := -1
+
+	nextVis := func(i int) antlr.Token {
+		for j := i + 1; j < len(all); j++ {
+			t := all[j]
+			if isEOFToken(t) {
+				return nil
+			}
+			if t.GetChannel() != antlr.TokenDefaultChannel {
+				continue
+			}
+			if isWhitespace(t.GetText()) {
+				continue
+			}
+			return t
+		}
+		return nil
+	}
+
+	for i := 0; i < len(all); i++ {
+		t := all[i]
+		if isEOFToken(t) {
+			break
+		}
+		if t.GetChannel() != antlr.TokenDefaultChannel {
+			continue
+		}
+		txt := t.GetText()
+		up := strings.ToUpper(txt)
+		// 进入 VALUES 段
+		if up == "VALUES" {
+			inValues = true
+			continue
+		}
+		if !inValues {
+			continue
+		}
+
+		switch txt {
+		case "(":
+			if !started {
+				started = true
+				depth = 0
+			}
+			if depth == 0 {
+				tupleStartRune = t.GetStart()
+			}
+			depth++
+		case ")":
+			if !started {
+				continue
+			}
+			depth--
+			if depth == 0 && tupleStartRune >= 0 {
+				// 一个顶层元组结束
+				s := runeIndexToByte(original, tupleStartRune)
+				e := runeIndexToByte(original, t.GetStop()+1)
+				ranges = append(ranges, rng{s: s, e: e})
+				tupleStartRune = -1
+
+				// 看下一个可见 token：若是逗号继续，否则结束 VALUES 段
+				if nv := nextVis(i); nv != nil && nv.GetText() == "," {
+					// 吞掉逗号，继续找下一个 '('
+					continue
+				} else {
+					// 不是逗号，说明 VALUES 段结束（可能遇到 ON DUPLICATE/ON CONFLICT/RETURNING 等）
+					i = len(all)
+				}
+			}
+		}
+	}
+
+	if len(ranges) == 0 {
+		return // 不是多行 VALUES（可能是 INSERT ... SELECT 或 ORACLE 的 INSERT ALL）
+	}
+
+	// 将参数按起始位置排序（稳定起见）
+	arr := *params
+	sort.SliceStable(arr, func(i, j int) bool { return arr[i].Start < arr[j].Start })
+
+	// 对每个元组区间内的参数，标 Row/Col
+	for rIdx, rg := range ranges {
+		rowParamsIdx := make([]int, 0, 4)
+		for i := range arr {
+			if arr[i].Start >= rg.s && arr[i].Start < rg.e {
+				rowParamsIdx = append(rowParamsIdx, i)
+			}
+		}
+		// 按出现顺序赋 Col（1-based）
+		for c, pi := range rowParamsIdx {
+			arr[pi].Row = rIdx + 1
+			arr[pi].Col = c + 1
+		}
+	}
+
+	// 写回
+	*params = arr
 }
