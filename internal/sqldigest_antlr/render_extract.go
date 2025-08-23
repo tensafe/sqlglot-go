@@ -139,6 +139,111 @@ func valuesSectionHasTimeFunc(toks []antlr.Token) bool {
 	return false
 }
 
+// ---------- 注释区间扫描（MySQL 专用） ----------
+type span struct{ S, E int } // [S,E) 字节区间
+
+// 基于原文扫描 MySQL 注释：/*! ... */、/* ... */、-- ...\n、# ...\n。
+// 忽略 ' " ` 引号中的模式，避免误删字符串内容。
+func findMySQLCommentSpans(s string) []span {
+	var spans []span
+	b := []byte(s)
+	n := len(b)
+
+	inSingle, inDouble, inBack, esc := false, false, false, false // ' " ` 与转义
+	for i := 0; i < n; {
+		ch := b[i]
+
+		// 处理转义（只在单/双引号里考虑 \ ）
+		if (inSingle || inDouble) && ch == '\\' && !esc {
+			esc = true
+			i++
+			continue
+		}
+		if esc {
+			esc = false
+			i++
+			continue
+		}
+
+		// 引号状态机
+		if ch == '\'' && !inDouble && !inBack {
+			inSingle = !inSingle
+			i++
+			continue
+		}
+		if ch == '"' && !inSingle && !inBack {
+			inDouble = !inDouble
+			i++
+			continue
+		}
+		if ch == '`' && !inSingle && !inDouble {
+			inBack = !inBack
+			i++
+			continue
+		}
+		// 引号内不识别注释
+		if inSingle || inDouble || inBack {
+			i++
+			continue
+		}
+
+		// 块注释 / 版本注释：/*...*/ 或 /*!...*/
+		if ch == '/' && i+1 < n && b[i+1] == '*' {
+			start := i
+			i += 2
+			for i+1 < n && !(b[i] == '*' && b[i+1] == '/') {
+				i++
+			}
+			if i+1 < n {
+				i += 2 // 吃掉 "*/"
+			}
+			spans = append(spans, span{S: start, E: i})
+			continue
+		}
+
+		// 行注释：-- ...\n
+		if ch == '-' && i+1 < n && b[i+1] == '-' {
+			start := i
+			i += 2
+			for i < n && b[i] != '\n' {
+				i++
+			}
+			if i < n {
+				i++ // 吃掉换行
+			}
+			spans = append(spans, span{S: start, E: i})
+			continue
+		}
+
+		// 行注释：# ...\n
+		if ch == '#' {
+			start := i
+			i++
+			for i < n && b[i] != '\n' {
+				i++
+			}
+			if i < n {
+				i++
+			}
+			spans = append(spans, span{S: start, E: i})
+			continue
+		}
+
+		i++
+	}
+	return spans
+}
+
+// 判断 token 的 [startByte,endByte) 是否与任何注释区间相交
+func inAnySpan(startByte, endByte int, spans []span) bool {
+	for _, sp := range spans {
+		if !(endByte <= sp.S || startByte >= sp.E) {
+			return true
+		}
+	}
+	return false
+}
+
 // 主流程：把 token 流规范化渲染为 digest，并抽取参数
 func renderAndExtract(original string, toks []antlr.Token, opt Options) (string, []ExParam) {
 	var out strings.Builder
@@ -147,6 +252,12 @@ func renderAndExtract(original string, toks []antlr.Token, opt Options) (string,
 	prevWord := ""
 	tightNext := false // 用于压制“下一词前空格”，例如 "::" 后面的类型名
 	parenDepth := 0    // 全局括号深度：遇到 '('++，遇到 ')'--；仅在 >0 时才输出 ')'
+
+	// MySQL 注释预处理：找出注释区间，循环中跳过落入区间的 token
+	var commentSpans []span
+	if opt.Dialect == MySQL {
+		commentSpans = findMySQLCommentSpans(original)
+	}
 
 	// INSERT…VALUES 折叠控制：仅当用户允许且 VALUES 段无绑定变量时才折叠
 	allowCollapseValues := opt.CollapseValuesInDigest && !valuesSectionHasBind(toks)
@@ -226,6 +337,15 @@ func renderAndExtract(original string, toks []antlr.Token, opt Options) (string,
 			if isWhitespace(t.GetText()) {
 				continue
 			}
+			// 注释过滤：下一个 token 若在注释区，继续往后找
+			if len(commentSpans) > 0 {
+				startByte := runeIndexToByte(original, t.GetStart())
+				endByte := runeIndexToByte(original, t.GetStop()+1)
+				if inAnySpan(startByte, endByte, commentSpans) {
+					i = j
+					continue
+				}
+			}
 			return t, j
 		}
 		return nil, i
@@ -241,8 +361,16 @@ func renderAndExtract(original string, toks []antlr.Token, opt Options) (string,
 		}
 		text := t.GetText()
 		if isWhitespace(text) {
-			// 完全忽略空白；我们自己决定何时插空格
 			continue
+		}
+
+		// —— 注释过滤：当前 token 落在注释区间内则跳过 ——
+		if len(commentSpans) > 0 {
+			startByte := runeIndexToByte(original, t.GetStart())
+			endByte := runeIndexToByte(original, t.GetStop()+1)
+			if inAnySpan(startByte, endByte, commentSpans) {
+				continue
+			}
 		}
 
 		// 合并 DATE/TIME/TIMESTAMP/INTERVAL '...' 为一个参数
@@ -315,12 +443,9 @@ func renderAndExtract(original string, toks []antlr.Token, opt Options) (string,
 					return nextVisible(idx)
 				}
 
-				// 1) 关键字无括号：SYSDATE / SYSTIMESTAMP / CURRENT_DATE / CURRENT_TIME / CURRENT_TIMESTAMP
-				// 直接参数化当前 token 本身
-				// 注意：有些方言允许 CURRENT_TIMESTAMP(3)，这种在下面 2) 识别
+				// 1) 无括号关键字
 				if up == "SYSDATE" || up == "SYSTIMESTAMP" || up == "CURRENT_DATE" || up == "CURRENT_TIME" || up == "CURRENT_TIMESTAMP" {
 					nv1, _ := nextTok(i)
-					// 若后面不是 "("，当作无括号关键字处理
 					if nv1 == nil || nv1.GetText() != "(" {
 						needSpaceBeforeWord()
 						startByte := runeIndexToByte(original, t.GetStart())
@@ -337,14 +462,12 @@ func renderAndExtract(original string, toks []antlr.Token, opt Options) (string,
 						prevWord = ""
 						continue
 					}
-					// 如果后面是 "("，落到 2) 的分支处理（例如 CURRENT_TIMESTAMP(3)）
 				}
 
-				// 2) 零参括号：NOW() / GETDATE() / GETUTCDATE() / SYSDATETIME() / SYSUTCDATETIME() / UTC_TIMESTAMP()
-				// 仅接受“(” 紧跟 “)”
+				// 2) func() / func(3)
 				if nv1, idx1 := nextTok(i); nv1 != nil && nv1.GetText() == "(" {
 					if nv2, idx2 := nextTok(idx1); nv2 != nil {
-						// 2.a) 零参：func ( )
+						// func()
 						if nv2.GetText() == ")" {
 							needSpaceBeforeWord()
 							startByte := runeIndexToByte(original, t.GetStart())
@@ -358,12 +481,11 @@ func renderAndExtract(original string, toks []antlr.Token, opt Options) (string,
 							if !suppressOut {
 								out.WriteString("?")
 							}
-							i = idx2 // 跳到 ')'
+							i = idx2
 							prevWord = ""
 							continue
 						}
-						// 2.b) 带精度：CURRENT_TIMESTAMP ( 3 ) / LOCALTIMESTAMP ( 6 ) / CURRENT_TIME ( 2 )
-						// 仅接受一个“纯数字 token” + 右括号
+						// func(3)
 						if isNumberLiteral(nv2.GetText()) {
 							if nv3, idx3 := nextTok(idx2); nv3 != nil && nv3.GetText() == ")" {
 								needSpaceBeforeWord()
@@ -378,15 +500,13 @@ func renderAndExtract(original string, toks []antlr.Token, opt Options) (string,
 								if !suppressOut {
 									out.WriteString("?")
 								}
-								i = idx3 // 跳到 ')'
+								i = idx3
 								prevWord = ""
 								continue
 							}
 						}
 					}
-					// 其它形态（例如带表达式、含逗号等）不参数化，交由常规渲染，防误吃
 				}
-				// 若既非无括号关键字，也非上述两种括号安全模式，则不参数化
 			}
 		}
 
@@ -441,7 +561,6 @@ func renderAndExtract(original string, toks []antlr.Token, opt Options) (string,
 			continue
 
 		case ".":
-			// 点左右不加空格：schema.table / t.* 等
 			if !suppressOut {
 				out.WriteByte('.')
 			}
@@ -483,7 +602,7 @@ func renderAndExtract(original string, toks []antlr.Token, opt Options) (string,
 				prevWord = ")"
 				continue
 			}
-			parenDepth-- // 有匹配的 '('，再处理 VALUES 深度/输出
+			parenDepth-- // 有匹配的 '('
 
 			// 结束一个括号层级（仅对 VALUES 路径做专门处理）
 			if inValues && valsDepth > 0 {
@@ -512,13 +631,15 @@ func renderAndExtract(original string, toks []antlr.Token, opt Options) (string,
 			tightNext = false
 			parenDepth = 0
 
-			out.WriteByte(';')
-			out.WriteByte(' ')
+			// —— 只有在已有内容时才真正输出分号（避免前导 ';'） ——
+			if lastNonSpace() != 0 {
+				out.WriteByte(';')
+				out.WriteByte(' ')
+			}
 			prevWord = ";"
 			continue
 
 		case "*":
-			// 若前一个是 '.'（t.*）则不加空格，否则作为“词”处理（前后留空格）
 			if !suppressOut {
 				if lastNonSpace() == '.' {
 					out.WriteByte('*')
