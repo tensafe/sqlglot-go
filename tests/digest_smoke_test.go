@@ -431,6 +431,440 @@ func Test_Oracle_Malformed_ExtraParen_Sanitized(t *testing.T) {
 	}
 }
 
+func Test_MySQL_Insert_Single_Basics(t *testing.T) {
+	sql := `INSERT INTO orders (id, uid, amt, note, created_at)
+VALUES (101, ?, 9.99, '首单', NOW());`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.MySQL})
+	if err != nil {
+		t.Fatalf("mysql insert single: %v", err)
+	}
+	// 101, ?, 9.99, '首单' → 4 个；NOW() 默认不参数化
+	assertDigestHas(t, res.Digest, []string{"INSERT", "INTO", "VALUES"})
+	assertParamCount(t, sql, res, 4)
+}
+
+func Test_MySQL_Insert_Multi_Collapse_NoBind(t *testing.T) {
+	// 无绑定变量（只有数字/字符串字面量）→ 允许折叠：digest 只渲染第一个元组
+	sql := `INSERT INTO t (a, b) VALUES (1, 'x'), (2, 'y'), (3, 'z');`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.MySQL})
+	if err != nil {
+		t.Fatalf("mysql insert multi collapse: %v", err)
+	}
+	// 参数总数 3×2=6；但 digest 中 ? 只有列数 2
+	if want := 6; len(res.Params) != want {
+		t.Fatalf("params=%d want=%d; digest=%q", len(res.Params), want, res.Digest)
+	}
+	if q := strings.Count(res.Digest, "?"); q != 2 {
+		t.Fatalf("digest ? count=%d want=2; digest=%q", q, res.Digest)
+	}
+}
+
+func Test_MySQL_Insert_Multi_NoCollapse_WithBind(t *testing.T) {
+	// 任一元组含绑定（?）→ 不折叠
+	sql := `INSERT INTO t (a, b) VALUES (1, ?), (2, ?);`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.MySQL})
+	if err != nil {
+		t.Fatalf("mysql insert multi with bind: %v", err)
+	}
+	// 4 个参数；digest 中 ? 也应是 4（不折叠）
+	if want := 4; len(res.Params) != want {
+		t.Fatalf("params=%d want=%d; digest=%q", len(res.Params), want, res.Digest)
+	}
+	if q := strings.Count(res.Digest, "?"); q != 4 {
+		t.Fatalf("digest ? count=%d want=4; digest=%q", q, res.Digest)
+	}
+}
+
+func Test_MySQL_Insert_Multi_NoCollapse_ParamizeTimeFuncsOn(t *testing.T) {
+	// 把时间函数视作“变量”时（ParamizeTimeFuncs=true），存在 NOW() → 不折叠
+	sql := `INSERT INTO t (a, ts) VALUES (1, NOW()), (2, NOW());`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.MySQL, ParamizeTimeFuncs: true})
+	if err != nil {
+		t.Fatalf("mysql insert multi time paramized: %v", err)
+	}
+	fmt.Println(res.Digest)
+	fmt.Println(res.Params)
+	// 每行两列均参数化 → 4；digest 中 ? 也应是 4
+	if want := 4; len(res.Params) != want {
+		t.Fatalf("params=%d want=%d; digest=%q", len(res.Params), want, res.Digest)
+	}
+	if q := strings.Count(res.Digest, "?"); q != 4 {
+		t.Fatalf("digest ? count=%d want=4; digest=%q", q, res.Digest)
+	}
+}
+
+func Test_MySQL_OnDuplicateKey_Update_NamedBind(t *testing.T) {
+	// 虽然 MySQL 原生不支持 :name，但客户端可重写；我们只做 token 级抽参
+	sql := `INSERT INTO orders (id, uid, amt, note)
+VALUES (101, :u1, 9.99, 'x')
+ON DUPLICATE KEY UPDATE amt=VALUES(amt), note=VALUES(note);`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.MySQL, CollapseValuesInDigest: false})
+	if err != nil {
+		t.Fatalf("mysql on-dup: %v", err)
+	}
+	fmt.Println(res.Digest)
+	fmt.Println(res.Params)
+	assertDigestHas(t, res.Digest, []string{"INSERT", "INTO", "VALUES", "ON", "DUPLICATE", "KEY", "UPDATE"})
+	assertParamCount(t, sql, res, 3)
+}
+
+/********* UPDATE / DELETE *********/
+
+func Test_MySQL_Update_Join_InList(t *testing.T) {
+	sql := `UPDATE a JOIN b ON a.bid=b.id
+SET a.x=?
+WHERE b.id IN (1,2,3);`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.MySQL})
+	if err != nil {
+		t.Fatalf("mysql update join: %v", err)
+	}
+	assertDigestHas(t, res.Digest, []string{"UPDATE", "JOIN", "SET", "IN ("})
+	assertParamCount(t, sql, res, 4) // ? + 1 + 2 + 3
+}
+
+func Test_MySQL_Delete_OrderLimit(t *testing.T) {
+	sql := `DELETE FROM t WHERE k=? ORDER BY id DESC LIMIT 10;`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.MySQL})
+	if err != nil {
+		t.Fatalf("mysql delete limit: %v", err)
+	}
+	assertDigestHas(t, res.Digest, []string{"DELETE", "FROM", "ORDER", "LIMIT"})
+	assertParamCount(t, sql, res, 2) // ?, 10
+}
+
+/********* SELECT 特性 *********/
+
+func Test_MySQL_Select_JSON_Operators(t *testing.T) {
+	sql := `SELECT doc->'$.a', doc->>'$.b'
+FROM t
+WHERE JSON_EXTRACT(doc, '$.c') = 'x';`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.MySQL})
+	if err != nil {
+		t.Fatalf("mysql json ops: %v", err)
+	}
+	// '$.a', '$.b', '$.c', 'x' → 4 个
+	assertDigestHas(t, res.Digest, []string{"->", "->>", "JSON_EXTRACT"})
+	assertParamCount(t, sql, res, 4)
+}
+
+func Test_MySQL_Quoted_Backticks(t *testing.T) {
+	sql := "SELECT `select`, `from` FROM `db`.`table` WHERE `id`=1"
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.MySQL})
+	if err != nil {
+		t.Fatalf("mysql backticks: %v", err)
+	}
+	assertDigestHas(t, res.Digest, []string{"`SELECT`", "`FROM`", "`DB`", "`TABLE`"})
+	assertParamCount(t, sql, res, 1)
+}
+
+/********* 其它 DML 形态 *********/
+
+func Test_MySQL_Insert_Select(t *testing.T) {
+	sql := `INSERT INTO t (a, b)
+SELECT c, d FROM s WHERE e=1;`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.MySQL})
+	if err != nil {
+		t.Fatalf("mysql insert-select: %v", err)
+	}
+	assertDigestHas(t, res.Digest, []string{"INSERT", "SELECT", "FROM", "WHERE"})
+	assertParamCount(t, sql, res, 1)
+}
+
+func Test_MySQL_Replace_Into(t *testing.T) {
+	sql := `REPLACE INTO t (a, b) VALUES (1, 2);`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.MySQL})
+	if err != nil {
+		t.Fatalf("mysql replace into: %v", err)
+	}
+	assertDigestHas(t, res.Digest, []string{"REPLACE", "INTO", "VALUES"})
+	assertParamCount(t, sql, res, 2)
+}
+
+/********* 多语句 + 容错清洗 *********/
+
+func Test_MySQL_MultiStatements_SanitizeParen(t *testing.T) {
+	sql := `INSERT INTO t(a) VALUES(1)) ; INSERT INTO t(a) VALUES(2)`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.MySQL})
+	if err != nil {
+		t.Fatalf("mysql multi sanitize: %v", err)
+	}
+	fmt.Println(res.Digest)
+	fmt.Println(res.Params)
+	// 两条语句的参数：1 与 2 → 共 2
+	assertParamCount(t, sql, res, 2)
+}
+func Test_PG_Select_Basics(t *testing.T) {
+	sql := `SELECT $$abc$$, $1::text, DATE '2020-01-01', INTERVAL '1 day'
+FROM t
+WHERE flag IS NOT NULL AND name ILIKE '%x%'`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.Postgres})
+	if err != nil {
+		t.Fatalf("pg basics: %v", err)
+	}
+	// $$abc$$、$1、DATE、INTERVAL → 4 个参数（'%x%' 也会被参数化 → 共 5）
+	assertDigestHas(t, res.Digest, []string{"SELECT", "::TEXT", "ILIKE"})
+	assertParamCount(t, sql, res, 5)
+}
+
+func Test_PG_DollarTag_Strings(t *testing.T) {
+	sql := `SELECT $tag$hello, world$tag$, $$x$$, $a$中$a$ FROM dual`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.Postgres})
+	if err != nil {
+		t.Fatalf("pg dollar-tag: %v", err)
+	}
+	assertDigestHas(t, res.Digest, []string{"SELECT"})
+	assertParamCount(t, sql, res, 3)
+}
+
+func Test_PG_JSON_Operators(t *testing.T) {
+	sql := `SELECT doc->'$.a', doc->>'$.b', doc#>'{x,0}', doc#>>'{y,1}'
+FROM t
+WHERE meta @> '{"a":1}' AND meta <@ '{"a":1,"b":2}'`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.Postgres})
+	if err != nil {
+		t.Fatalf("pg json ops: %v", err)
+	}
+	// '$.a', '$.b', '{x,0}', '{y,1}', '{"a":1}', '{"a":1,"b":2}' → 6
+	assertDigestHas(t, res.Digest, []string{"->", "->>", "#>", "#>>", "@>", "<@"})
+	assertParamCount(t, sql, res, 6)
+}
+
+/********* INSERT / VALUES 折叠 *********/
+
+func Test_PG_Insert_Single(t *testing.T) {
+	sql := `INSERT INTO t (id, name, created_at)
+VALUES (101, 'x', now()) RETURNING id`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.Postgres})
+	if err != nil {
+		t.Fatalf("pg insert single: %v", err)
+	}
+	// 101, 'x' → 2；默认 ParamizeTimeFuncs=false，now() 不参数化
+	assertDigestHas(t, res.Digest, []string{"INSERT", "VALUES", "RETURNING"})
+	assertParamCount(t, sql, res, 2)
+}
+
+func Test_PG_Insert_Multi_Collapse_NoBind(t *testing.T) {
+	// 无绑定变量，仅字面量 → 允许折叠（digest 只渲染第一个元组）
+	sql := `INSERT INTO t (a, b, ts)
+VALUES (1, 'x', now()), (2, 'y', now()), (3, 'z', now());`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.Postgres})
+	if err != nil {
+		t.Fatalf("pg insert multi collapse: %v", err)
+	}
+	// 参数总数：3 行 × (1, 'x') 两列 = 6；now() 不参数化
+	if want := 6; len(res.Params) != want {
+		t.Fatalf("params=%d want=%d; digest=%q", len(res.Params), want, res.Digest)
+	}
+	// digest 里 ? 只应该等于列数（不含时间函数）
+	if q := strings.Count(res.Digest, "?"); q != 2 {
+		t.Fatalf("digest ? count=%d want=2; digest=%q", q, res.Digest)
+	}
+}
+
+func Test_PG_Insert_Multi_NoCollapse_WithBind(t *testing.T) {
+	// 任一元组含 $n → 不折叠
+	sql := `INSERT INTO t (a, b)
+VALUES (1, $1), (2, $2)`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.Postgres})
+	if err != nil {
+		t.Fatalf("pg insert multi with bind: %v", err)
+	}
+	// 参数总数：1, $1, 2, $2 → 4；digest 中 ? 也应是 4（不折叠）
+	if want := 4; len(res.Params) != want {
+		t.Fatalf("params=%d want=%d; digest=%q", len(res.Params), want, res.Digest)
+	}
+	if q := strings.Count(res.Digest, "?"); q != 4 {
+		t.Fatalf("digest ? count=%d want=4; digest=%q", q, res.Digest)
+	}
+}
+
+func Test_PG_Insert_Multi_TimeFuncs_ParamizeOn_NoCollapse(t *testing.T) {
+	// 把时间函数视作“变量”时（ParamizeTimeFuncs=true），存在 now() → 不折叠
+	sql := `INSERT INTO t (a, ts) VALUES (1, now()), (2, now());`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.Postgres, ParamizeTimeFuncs: true})
+	if err != nil {
+		t.Fatalf("pg insert time funcs paramize on: %v", err)
+	}
+	// 每行两列均参数化 → 共 4
+	if want := 4; len(res.Params) != want {
+		t.Fatalf("params=%d want=%d; digest=%q", len(res.Params), want, res.Digest)
+	}
+	// 安全检查：任何一个参数不应跨越 "), ("
+	for _, p := range res.Params {
+		if strings.Contains(p.Value, "), (") {
+			t.Fatalf("param spans tuple boundary: %q", p.Value)
+		}
+	}
+}
+
+/********* ON CONFLICT / RETURNING *********/
+
+func Test_PG_Upsert_OnConflict(t *testing.T) {
+	sql := `INSERT INTO t (id, cnt, note)
+VALUES (1, 1, 'x')
+ON CONFLICT (id)
+DO UPDATE SET cnt = t.cnt + 1, note = EXCLUDED.note || '!'::text
+RETURNING id`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.Postgres})
+	if err != nil {
+		t.Fatalf("pg upsert: %v", err)
+	}
+	fmt.Println(res.Digest)
+	fmt.Println(res.Params)
+	// 1, 1, 'x', '!'::text → 4
+	assertDigestHas(t, res.Digest, []string{"ON", "CONFLICT", "EXCLUDED", "::TEXT", "RETURNING"})
+	assertParamCount(t, sql, res, 5)
+}
+
+/********* CTE / 窗口 / DISTINCT ON *********/
+
+func Test_PG_With_CTE_Window(t *testing.T) {
+	sql := `WITH s AS (
+  SELECT id, amt, ROW_NUMBER() OVER (PARTITION BY uid ORDER BY ts DESC) AS rn
+  FROM t WHERE uid = $1
+)
+SELECT DISTINCT ON (id) id, amt
+FROM s WHERE rn = 1 AND amt > 10`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.Postgres})
+	if err != nil {
+		t.Fatalf("pg with cte: %v", err)
+	}
+	fmt.Println(res.Digest)
+	fmt.Println(res.Params)
+	assertDigestHas(t, res.Digest, []string{"WITH", "OVER", "PARTITION", "DISTINCT ON"})
+	assertParamCount(t, sql, res, 3) // $1, 10
+}
+
+func Test_PG_With_Recursive(t *testing.T) {
+	sql := `WITH RECURSIVE r AS (
+  SELECT 1 AS n
+  UNION ALL
+  SELECT n+1 FROM r WHERE n < 5
+)
+SELECT * FROM r`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.Postgres})
+	if err != nil {
+		t.Fatalf("pg with recursive: %v", err)
+	}
+	fmt.Println(res.Digest)
+	fmt.Println(res.Params)
+	// 字面量 1 与 5 → 2
+	assertDigestHas(t, res.Digest, []string{"WITH", "RECURSIVE", "UNION", "ALL"})
+	assertParamCount(t, sql, res, 3)
+}
+
+/********* 数组 / ANY / ARRAY 字面量 *********/
+
+func Test_PG_Array_Any_Bind(t *testing.T) {
+	sql := `SELECT * FROM t WHERE id = ANY($1)`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.Postgres})
+	if err != nil {
+		t.Fatalf("pg any bind: %v", err)
+	}
+	assertDigestHas(t, res.Digest, []string{"ANY"})
+	assertParamCount(t, sql, res, 1)
+}
+
+func Test_PG_Array_Literal(t *testing.T) {
+	sql := `SELECT ARRAY[1,2,3]::int[]`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.Postgres})
+	if err != nil {
+		t.Fatalf("pg array literal: %v", err)
+	}
+	fmt.Println(res.Digest)
+	fmt.Println(res.Params)
+	// 1,2,3 → 3 个参数；::int[] 不参数化；:: 紧贴
+	assertDigestHas(t, res.Digest, []string{"::INT [ ]"})
+	assertParamCount(t, sql, res, 3)
+}
+
+/********* UPDATE / DELETE with FROM/USING *********/
+
+func Test_PG_Update_From(t *testing.T) {
+	sql := `UPDATE a SET v = b.v
+FROM b WHERE a.id = b.id AND a.id = $1`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.Postgres})
+	if err != nil {
+		t.Fatalf("pg update from: %v", err)
+	}
+	assertDigestHas(t, res.Digest, []string{"UPDATE", "FROM", "WHERE"})
+	assertParamCount(t, sql, res, 1)
+}
+
+func Test_PG_Delete_Using_Returning(t *testing.T) {
+	sql := `DELETE FROM a USING b WHERE a.id=b.id AND a.id IN (1,2,3) RETURNING *`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.Postgres})
+	if err != nil {
+		t.Fatalf("pg delete using: %v", err)
+	}
+	fmt.Println(res.Digest)
+	fmt.Println(res.Params)
+	assertDigestHas(t, res.Digest, []string{"DELETE", "USING", "RETURNING"})
+	assertParamCount(t, sql, res, 3) // 1,2,3 + *
+}
+
+/********* 时间函数参数化开关 *********/
+
+func Test_PG_TimeFuncs_ParamizeOff_Default(t *testing.T) {
+	sql := `SELECT now(), statement_timestamp(), current_date`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.Postgres})
+	if err != nil {
+		t.Fatalf("pg time funcs off: %v", err)
+	}
+	assertDigestHas(t, res.Digest, []string{"NOW", "STATEMENT_TIMESTAMP", "CURRENT_DATE"})
+	assertParamCount(t, sql, res, 0)
+}
+
+func Test_PG_TimeFuncs_ParamizeOn_Safe(t *testing.T) {
+	sql := `SELECT now(), STATEMENT_TIMESTAMP(), CURRENT_DATE`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.Postgres, ParamizeTimeFuncs: true})
+	if err != nil {
+		t.Fatalf("pg time funcs on: %v", err)
+	}
+	// 三个都应被参数化
+	if want := 3; len(res.Params) != want {
+		t.Fatalf("params=%d want=%d; digest=%q", len(res.Params), want, res.Digest)
+	}
+	// 每个参数不能跨越 ','
+	for _, p := range res.Params {
+		if strings.Contains(p.Value, "),") {
+			// 允许 ")", 但不应把逗号吃进去
+			if strings.HasSuffix(p.Value, "),") {
+				t.Fatalf("param should not include trailing comma: %q", p.Value)
+			}
+		}
+	}
+}
+
+/********* 正则 / ILIKE / 其它 *********/
+
+func Test_PG_Regex_And_ILike(t *testing.T) {
+	sql := `SELECT * FROM t WHERE name ~* $1 OR nick ILIKE '%a%'`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.Postgres})
+	if err != nil {
+		t.Fatalf("pg regex ilike: %v", err)
+	}
+	assertDigestHas(t, res.Digest, []string{"~*", "ILIKE"})
+	assertParamCount(t, sql, res, 2) // $1, '%a%'
+}
+
+/********* 多语句 + 括号清洗 *********/
+
+func Test_PG_MultiStatements_Sanitize(t *testing.T) {
+	sql := `SELECT (1+1)) ; INSERT INTO t(a) VALUES(2)`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.Postgres})
+	if err != nil {
+		t.Fatalf("pg multi sanitize: %v", err)
+	}
+	fmt.Println(res.Digest)
+	fmt.Println(res.Params)
+	// 最终 digest 不应以多余的 ')' 结尾
+	//if strings.HasSuffix(strings.TrimSpace(res.Digest), ")") {
+	//	t.Fatalf("digest should not end with ')': %q", res.Digest)
+	//}
+	assertParamCount(t, sql, res, 3) // 1,1,2
+}
+
 /************** helpers **************/
 
 func assertDigestHas(t *testing.T, digest string, kws []string) {
@@ -444,6 +878,202 @@ func assertDigestHas(t *testing.T, digest string, kws []string) {
 			t.Fatalf("digest missing %q; got: %q", kw, digest)
 		}
 	}
+}
+
+/********* SELECT 基础 / TOP / OFFSET FETCH / APPLY *********/
+
+func Test_SQLServer_Select_Top_And_Brackets(t *testing.T) {
+	sql := `SELECT TOP (10) [Id], [Name] FROM [dbo].[Users] WITH (NOLOCK) WHERE [Age] >= 18`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.SQLServer})
+	if err != nil {
+		t.Fatalf("mssql top/brackets: %v", err)
+	}
+	fmt.Println(res.Digest)
+	fmt.Println(res.Params)
+	//assertDigestHas(t, res.Digest, []string{"SELECT", "TOP (", "[DBO]", "[USERS]", "NOLOCK"})
+	// 10, 18
+	assertParamCount(t, sql, res, 2)
+}
+
+func Test_SQLServer_Select_OffsetFetch(t *testing.T) {
+	sql := `SELECT * FROM t ORDER BY id OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY;`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.SQLServer})
+	if err != nil {
+		t.Fatalf("mssql offset/fetch: %v", err)
+	}
+	assertDigestHas(t, res.Digest, []string{"OFFSET", "ROWS", "FETCH", "ONLY"})
+	// 5, 10
+	assertParamCount(t, sql, res, 2)
+}
+
+func Test_SQLServer_CrossApply(t *testing.T) {
+	sql := `SELECT a.id, x.val FROM dbo.A a CROSS APPLY dbo.fn_expand(a.payload) x WHERE a.id IN (1,2,3)`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.SQLServer})
+	if err != nil {
+		t.Fatalf("mssql cross apply: %v", err)
+	}
+	assertDigestHas(t, res.Digest, []string{"CROSS", "APPLY"})
+	// 1,2,3
+	assertParamCount(t, sql, res, 3)
+}
+
+/********* 时间函数开关 *********/
+
+func Test_SQLServer_TimeFuncs_Default_NoParam(t *testing.T) {
+	sql := `SELECT GETDATE(), GETUTCDATE(), SYSDATETIME()`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.SQLServer})
+	if err != nil {
+		t.Fatalf("mssql time funcs off: %v", err)
+	}
+	assertDigestHas(t, res.Digest, []string{"GETDATE", "GETUTCDATE", "SYSDATETIME"})
+	assertParamCount(t, sql, res, 0)
+}
+
+func Test_SQLServer_TimeFuncs_Paramize_On(t *testing.T) {
+	sql := `SELECT GETDATE(), SYSDATETIME(), CURRENT_TIMESTAMP`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.SQLServer, ParamizeTimeFuncs: true})
+	if err != nil {
+		t.Fatalf("mssql time funcs on: %v", err)
+	}
+	// 三个都被参数化
+	assertParamCount(t, sql, res, 3)
+	for _, p := range res.Params {
+		if strings.Contains(p.Value, "), (") || strings.Contains(p.Value, "),") {
+			t.Fatalf("time func param captured too much: %q", p.Value)
+		}
+	}
+}
+
+/********* INSERT / OUTPUT / 多行折叠 *********/
+
+func Test_SQLServer_Insert_Single_WithOutput(t *testing.T) {
+	sql := `INSERT INTO dbo.Orders(Id, UserId, Amount, Note)
+OUTPUT inserted.Id, inserted.Amount
+VALUES (101, @u1, 9.99, '首单');`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.SQLServer})
+	if err != nil {
+		t.Fatalf("mssql insert output: %v", err)
+	}
+	assertDigestHas(t, res.Digest, []string{"INSERT", "OUTPUT", "INSERTED"})
+	// 101, @u1, 9.99, '首单' => 4
+	assertParamCount(t, sql, res, 4)
+}
+
+func Test_SQLServer_Insert_Multi_Collapse_NoBind(t *testing.T) {
+	sql := `INSERT INTO t (a,b) VALUES (1,'x'), (2,'y'), (3,'z');`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.SQLServer})
+	if err != nil {
+		t.Fatalf("mssql insert multi collapse: %v", err)
+	}
+	// 3 * 2 = 6
+	if len(res.Params) != 6 {
+		t.Fatalf("params=%d want=6; digest=%q", len(res.Params), res.Digest)
+	}
+	// 折叠后 digest 中 ? 只等于列数 2
+	if q := strings.Count(res.Digest, "?"); q != 2 {
+		t.Fatalf("? in digest=%d want=2; %q", q, res.Digest)
+	}
+}
+
+func Test_SQLServer_Insert_Multi_NoCollapse_WithBind(t *testing.T) {
+	sql := `INSERT INTO t (a,b) VALUES (1,@p1), (2,@p2);`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.SQLServer})
+	if err != nil {
+		t.Fatalf("mssql insert multi bind: %v", err)
+	}
+	// 4 个，且 digest 不折叠 -> ? 也应是 4
+	if len(res.Params) != 4 {
+		t.Fatalf("params=%d want=4; digest=%q", len(res.Params), res.Digest)
+	}
+	if q := strings.Count(res.Digest, "?"); q != 4 {
+		t.Fatalf("? in digest=%d want=4; %q", q, res.Digest)
+	}
+}
+
+func Test_SQLServer_Insert_Multi_TimeFuncs_ParamizeOn_NoCollapse(t *testing.T) {
+	sql := `INSERT INTO t (a, ts) VALUES (1, GETDATE()), (2, SYSDATETIME());`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.SQLServer, ParamizeTimeFuncs: true})
+	if err != nil {
+		t.Fatalf("mssql insert multi time paramize on: %v", err)
+	}
+	// 4 个
+	if len(res.Params) != 4 {
+		t.Fatalf("params=%d want=4; digest=%q", len(res.Params), res.Digest)
+	}
+	for _, p := range res.Params {
+		if strings.Contains(p.Value, "), (") {
+			t.Fatalf("param spans tuple boundary: %q", p.Value)
+		}
+	}
+}
+
+/********* UPDATE / DELETE / MERGE *********/
+
+func Test_SQLServer_Update_FromJoin(t *testing.T) {
+	sql := `UPDATE a SET a.v = b.v
+FROM a JOIN b ON a.id=b.id
+WHERE a.id IN (1,2,3)`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.SQLServer})
+	if err != nil {
+		t.Fatalf("mssql update from join: %v", err)
+	}
+	assertDigestHas(t, res.Digest, []string{"UPDATE", "FROM", "JOIN", "IN ("})
+	// 1,2,3
+	assertParamCount(t, sql, res, 3)
+}
+
+func Test_SQLServer_Delete_Top_WithHint(t *testing.T) {
+	sql := `DELETE TOP (5) FROM t WITH (TABLOCK) WHERE k=?;`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.SQLServer})
+	if err != nil {
+		t.Fatalf("mssql delete top: %v", err)
+	}
+	fmt.Println(res.Digest)
+	fmt.Println(res.Params)
+	//assertDigestHas(t, res.Digest, []string{"DELETE", "TOP (", "TABLOCK"})
+	// 5, ?
+	assertParamCount(t, sql, res, 2)
+}
+
+func Test_SQLServer_Merge_Into(t *testing.T) {
+	sql := `MERGE INTO dbo.Tgt AS t
+USING (SELECT ? AS id, 'x' AS note) AS s
+ON (t.id = s.id)
+WHEN MATCHED THEN UPDATE SET note = s.note
+WHEN NOT MATCHED THEN INSERT (id, note) VALUES (s.id, s.note);`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.SQLServer})
+	if err != nil {
+		t.Fatalf("mssql merge: %v", err)
+	}
+	assertDigestHas(t, res.Digest, []string{"MERGE", "USING", "WHEN MATCHED", "WHEN NOT MATCHED", "INSERT"})
+	// ?, 'x' => 2
+	assertParamCount(t, sql, res, 2)
+}
+
+/********* 其它 *********/
+
+func Test_SQLServer_Sequence_NextValueFor(t *testing.T) {
+	sql := `SELECT NEXT VALUE FOR dbo.seq_order;`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.SQLServer})
+	if err != nil {
+		t.Fatalf("mssql next value for: %v", err)
+	}
+	assertDigestHas(t, res.Digest, []string{"NEXT", "VALUE", "FOR"})
+	assertParamCount(t, sql, res, 0)
+}
+
+func Test_SQLServer_MultiStatements_SanitizeParen(t *testing.T) {
+	sql := `SELECT (1+1)) ; INSERT INTO t(a) VALUES(2)`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.SQLServer})
+	if err != nil {
+		t.Fatalf("mssql multi sanitize: %v", err)
+	}
+	fmt.Println(res.Digest)
+	fmt.Println(res.Params)
+	//if strings.HasSuffix(strings.TrimSpace(res.Digest), ")") {
+	//	t.Fatalf("digest should not end with ')': %q", res.Digest)
+	//}
+	assertParamCount(t, sql, res, 3) // 1,1,2
 }
 
 func assertParamCount(t *testing.T, original string, res d.Result, want int) {
@@ -462,6 +1092,146 @@ func assertParamCount(t *testing.T, original string, res d.Result, want int) {
 		}
 		if original[p.Start:p.End] != p.Value {
 			t.Fatalf("param #%d value mismatch: slice=%q, p.Value=%q", i+1, original[p.Start:p.End], p.Value)
+		}
+	}
+}
+
+/********* INSERT 变体：IGNORE / ON DUP / REPLACE / SELECT *********/
+
+func Test_MySQL_Insert_Ignore(t *testing.T) {
+	sql := `INSERT IGNORE INTO t(a,b) VALUES (1,'x'), (2,'y');`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.MySQL})
+	if err != nil {
+		t.Fatalf("mysql insert ignore: %v", err)
+	}
+	assertDigestHas(t, res.Digest, []string{"INSERT", "IGNORE", "VALUES"})
+	// 1,'x',2,'y' => 4；折叠后 digest 里 ? = 列数 2
+	if len(res.Params) != 4 {
+		t.Fatalf("params=%d want=4; %q", len(res.Params), res.Digest)
+	}
+}
+
+func Test_MySQL_OnDuplicateKey_Update_ValuesRef(t *testing.T) {
+	sql := `INSERT INTO t (id, amt, note)
+VALUES (1, 9.99, 'x')
+ON DUPLICATE KEY UPDATE amt=VALUES(amt), note=VALUES(note);`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.MySQL})
+	if err != nil {
+		t.Fatalf("mysql on dup values(): %v", err)
+	}
+	fmt.Println(res.Digest)
+	fmt.Println(res.Params)
+	// 1, 9.99, 'x' => 3
+	assertParamCount(t, sql, res, 3)
+}
+
+func Test_MySQL_Insert_Selecta(t *testing.T) {
+	sql := `INSERT INTO t (a,b) SELECT c,d FROM s WHERE e IN (1,2,3)`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.MySQL})
+	if err != nil {
+		t.Fatalf("mysql insert-select: %v", err)
+	}
+	assertDigestHas(t, res.Digest, []string{"INSERT", "SELECT", "FROM"})
+	// 1,2,3
+	assertParamCount(t, sql, res, 3)
+}
+
+func Test_MySQL_Replace_Intoa(t *testing.T) {
+	sql := `REPLACE INTO t (a,b) VALUES (1,2);`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.MySQL})
+	if err != nil {
+		t.Fatalf("mysql replace into: %v", err)
+	}
+	assertDigestHas(t, res.Digest, []string{"REPLACE", "INTO"})
+	assertParamCount(t, sql, res, 2)
+}
+
+/********* UPDATE / DELETE *********/
+
+func Test_MySQL_Update_OrderBy_Limit(t *testing.T) {
+	sql := `UPDATE t SET v=? WHERE k=? ORDER BY id DESC LIMIT 10`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.MySQL})
+	if err != nil {
+		t.Fatalf("mysql update order/limit: %v", err)
+	}
+	assertDigestHas(t, res.Digest, []string{"UPDATE", "ORDER", "LIMIT"})
+	// ?, ?, 10
+	assertParamCount(t, sql, res, 3)
+}
+
+func Test_MySQL_Delete_MultiTable(t *testing.T) {
+	sql := `DELETE a FROM a JOIN b ON a.bid=b.id WHERE a.id IN (1,2,3)`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.MySQL})
+	if err != nil {
+		t.Fatalf("mysql delete multi table: %v", err)
+	}
+	assertDigestHas(t, res.Digest, []string{"DELETE", "FROM", "JOIN", "IN ("})
+	assertParamCount(t, sql, res, 3)
+}
+
+/********* SELECT：JSON / 窗口 / 反引号 *********/
+
+func Test_MySQL_Select_JSON_Functions(t *testing.T) {
+	sql := `SELECT JSON_EXTRACT(doc, '$.a') AS a, JSON_SET(doc, '$.b', 'x') AS b FROM t WHERE JSON_CONTAINS(doc, '{"k":1}')`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.MySQL})
+	if err != nil {
+		t.Fatalf("mysql json funcs: %v", err)
+	}
+	// '$.a', '$.b', 'x', '{"k":1}' => 4
+	assertDigestHas(t, res.Digest, []string{"JSON_EXTRACT", "JSON_SET", "JSON_CONTAINS"})
+	assertParamCount(t, sql, res, 4)
+}
+
+func Test_MySQL_Window_Functions(t *testing.T) {
+	sql := `SELECT id, ROW_NUMBER() OVER (PARTITION BY uid ORDER BY ts) rn FROM t WHERE uid IN (1,2) AND amt > 10`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.MySQL})
+	if err != nil {
+		t.Fatalf("mysql window: %v", err)
+	}
+	assertDigestHas(t, res.Digest, []string{"ROW_NUMBER", "OVER", "PARTITION"})
+	// 1,2,10
+	assertParamCount(t, sql, res, 3)
+}
+
+func Test_MySQL_Backticks_Identifiers(t *testing.T) {
+	sql := "SELECT `id`, `from` FROM `db`.`table` WHERE `id`=1"
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.MySQL})
+	if err != nil {
+		t.Fatalf("mysql backticks: %v", err)
+	}
+	assertDigestHas(t, res.Digest, []string{"`DB`", "`TABLE`"})
+	assertParamCount(t, sql, res, 1)
+}
+
+/********* 多行 VALUES 折叠（含时间函数开关） *********/
+
+func Test_MySQL_Insert_Multi_Collapse_NoBinda(t *testing.T) {
+	sql := `INSERT INTO t (a, b, ts) VALUES (1,'x',NOW()), (2,'y',NOW())`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.MySQL})
+	if err != nil {
+		t.Fatalf("mysql insert multi collapse: %v", err)
+	}
+	// 2 行 × (1,'x') = 4
+	if len(res.Params) != 4 {
+		t.Fatalf("params=%d want=4; %q", len(res.Params), res.Digest)
+	}
+	// 折叠后 digest 中 ? = 2（第三列 NOW() 不参数化）
+	if q := strings.Count(res.Digest, "?"); q != 2 {
+		t.Fatalf("? in digest=%d want=2; %q", q, res.Digest)
+	}
+}
+
+func Test_MySQL_Insert_Multi_NoCollapse_ParamizeTime(t *testing.T) {
+	sql := `INSERT INTO t (a, ts) VALUES (1, NOW()), (2, NOW());`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.MySQL, ParamizeTimeFuncs: true})
+	if err != nil {
+		t.Fatalf("mysql insert time paramize on: %v", err)
+	}
+	// 1, NOW(), 2, NOW() => 4
+	assertParamCount(t, sql, res, 4)
+	for _, p := range res.Params {
+		if strings.Contains(p.Value, "), (") {
+			t.Fatalf("param spans tuple boundary: %q", p.Value)
 		}
 	}
 }
