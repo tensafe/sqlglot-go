@@ -1462,6 +1462,135 @@ UPDATE t SET v=(SELECT max(x) FROM s WHERE k IN (4,5))) WHERE id=6)) ;
 	assertParamCount(t, sql, res, 6)
 }
 
+/************** MySQL **************/
+
+var corpusMySQL = []string{
+	`/*!40101 SET @a:=1*/; INSERT /*x*/ INTO t (a,b) VALUES (1,'x'),(2,'y'); -- tail`,
+	`INSERT IGNORE INTO t(a,b) VALUES (1,'x')`,
+	`REPLACE INTO t (a,b) VALUES (1,2)`,
+	`INSERT INTO t(a,b) SELECT c,d FROM s WHERE e IN (1,2,3)`,
+	`UPDATE t SET v=? WHERE k=:n ORDER BY id DESC LIMIT 10`,
+	`DELETE a FROM a JOIN b ON a.bid=b.id WHERE a.id IN (1,2,3)`,
+	`SELECT JSON_EXTRACT(doc,'$.a'), JSON_SET(doc,'$.b','x') FROM t WHERE JSON_CONTAINS(doc,'{"k":1}')`,
+	`SELECT id, ROW_NUMBER() OVER (PARTITION BY uid ORDER BY ts) rn FROM t WHERE amt > 10`,
+	"SELECT `id`, `from` FROM `db`.`table` WHERE `id`=1",
+	`INSERT INTO t(a,ts) VALUES (1,NOW()),(2,NOW())`,
+	`INSERT INTO t (id,amt,note) VALUES (1,9.99,'x') ON DUPLICATE KEY UPDATE amt=VALUES(amt), note=VALUES(note)`,
+	`SELECT * FROM t WHERE name LIKE '%\_%' ESCAPE '\'`,
+	`SELECT * FROM t WHERE dt BETWEEN DATE '2020-01-01' AND DATE '2020-12-31'`,
+	`SELECT a->'$.x', a->>'$.y' FROM j`,
+	`INSERT INTO t(a,b,c) VALUES (1,:n,?),(2,$1,3)`,
+	`SELECT /*+ MAX_EXECUTION_TIME(1000) */ * FROM t WHERE a>=10`,
+	`SELECT * FROM t WHERE k <=> NULL`,
+	`SELECT DISTINCT a,b FROM t WHERE b REGEXP '^[a-z]+'`,
+}
+
+/************** PostgreSQL **************/
+
+var corpusPG = []string{
+	`SELECT $$abc$$, $1::text, DATE '2020-01-01', INTERVAL '1 day' FROM t WHERE flag IS NOT NULL AND name ILIKE '%x%'`,
+	`SELECT doc->'a', doc->>'b', doc#>'{x,0}', doc#>>'{y,1}' FROM t WHERE meta @> '{"a":1}'`,
+	`INSERT INTO t (id, name, created_at) VALUES (101, 'x', now()) RETURNING id`,
+	`INSERT INTO t (a,b,ts) VALUES (1,'x',now()), (2,'y',now()), (3,'z',now())`,
+	`INSERT INTO t (a,b) VALUES (1,$1), (2,$2)`,
+	`INSERT INTO t (a, ts) VALUES (1, now()), (2, now())`,
+	`INSERT INTO t (id,cnt,note) VALUES (1,1,'x') ON CONFLICT (id) DO UPDATE SET cnt = t.cnt + 1, note = EXCLUDED.note || '!'::text RETURNING id`,
+	`WITH s AS (SELECT id, amt, ROW_NUMBER() OVER (PARTITION BY uid ORDER BY ts DESC) AS rn FROM t WHERE uid = $1) SELECT DISTINCT ON (id) id, amt FROM s WHERE rn = 1 AND amt > 10`,
+	`WITH RECURSIVE r AS (SELECT 1 AS n UNION ALL SELECT n+1 FROM r WHERE n < 5) SELECT * FROM r`,
+	`SELECT ARRAY[1,2,3]::int[]`,
+	`UPDATE a SET v = b.v FROM b WHERE a.id = b.id AND a.id = $1`,
+	`DELETE FROM a USING b WHERE a.id=b.id AND a.id IN (1,2,3) RETURNING *`,
+	`SELECT now(), statement_timestamp(), current_date`,
+	`SELECT * FROM t WHERE name ~* $1 OR nick ILIKE '%a%'`,
+	`SELECT to_char(now(),'YYYY-MM-DD')`,
+}
+
+/************** SQL Server **************/
+
+var corpusMSSQL = []string{
+	`SELECT TOP (10) [Id], [Name] FROM [dbo].[Users] WITH (NOLOCK) WHERE [Age] >= 18`,
+	`SELECT * FROM t ORDER BY id OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY`,
+	`SELECT a.id, x.val FROM dbo.A a CROSS APPLY dbo.fn_expand(a.payload) x WHERE a.id IN (1,2,3)`,
+	`SELECT GETDATE(), GETUTCDATE(), SYSDATETIME()`,
+	`INSERT INTO dbo.Orders(Id, UserId, Amount, Note) OUTPUT inserted.Id, inserted.Amount VALUES (101, @u1, 9.99, '首单')`,
+	`INSERT INTO t (a,b) VALUES (1,'x'), (2,'y'), (3,'z')`,
+	`INSERT INTO t (a,b) VALUES (1,@p1), (2,@p2)`,
+	`INSERT INTO t (a, ts) VALUES (1, GETDATE()), (2, SYSDATETIME())`,
+	`UPDATE a SET a.v = b.v FROM a JOIN b ON a.id=b.id WHERE a.id IN (1,2,3)`,
+	`DELETE TOP (5) FROM t WITH (TABLOCK) WHERE k=@p1`,
+	`MERGE INTO dbo.Tgt AS t USING (SELECT @id AS id, 'x' AS note) AS s ON (t.id = s.id) WHEN MATCHED THEN UPDATE SET note = s.note WHEN NOT MATCHED THEN INSERT (id, note) VALUES (s.id, s.note)`,
+	`SELECT NEXT VALUE FOR dbo.seq_order`,
+	`SELECT CASE WHEN @x IS NULL THEN 'n' ELSE 'y' END AS v FROM t ORDER BY id OFFSET 0 ROWS FETCH NEXT 1 ROWS ONLY`,
+	`SELECT * FROM OPENJSON(@json)`,
+}
+
+/************** Oracle **************/
+
+var corpusOracle = []string{
+	`SELECT q'[a 'b' c]', q'{x{y}z}', q'@p@' FROM dual`,
+	`SELECT e.ename, d.dname FROM emp e, dept d WHERE e.deptno = d.deptno(+)`,
+	`SELECT LEVEL FROM dual CONNECT BY LEVEL <= :n`,
+	`SELECT SYSDATE, SYSTIMESTAMP FROM dual`,
+	`INSERT INTO t (id, note) VALUES (:id, q'[x]') RETURNING id INTO :out_id`,
+	`MERGE INTO tgt t USING (SELECT :id AS id, :note AS note FROM dual) s ON (t.id = s.id) WHEN MATCHED THEN UPDATE SET t.note = s.note WHEN NOT MATCHED THEN INSERT (id, note) VALUES (s.id, s.note)`,
+	`UPDATE t SET v = NVL(:v, v) WHERE id IN (1,2,3)`,
+	`DELETE FROM t WHERE dt BETWEEN DATE '2020-01-01' AND DATE '2020-12-31'`,
+	`SELECT CAST(:n AS NUMBER(10,2)) FROM dual`,
+	`SELECT * FROM t WHERE REGEXP_LIKE(name, '^[A-Z]+$')`,
+	`SELECT EXTRACT(YEAR FROM SYSTIMESTAMP) FROM dual`,
+	`INSERT INTO t (a,b,c) VALUES (1, 'x', :y)`,
+	`SELECT /*+ INDEX(t idx_t_a) */ * FROM t WHERE a > 10`,
+	`SELECT t.* FROM t WHERE EXISTS (SELECT 1 FROM s WHERE s.id = t.id AND ROWNUM <= 10)`,
+	`WITH x AS (SELECT 1 AS n FROM dual UNION ALL SELECT 2 FROM dual) SELECT * FROM x`,
+}
+
+/************** Runner **************/
+
+func Test_Corpus_More(t *testing.T) {
+	runCorpus := func(name string, dialect d.Dialect, sqls []string, opt d.Options) {
+		t.Helper()
+		t.Run(name, func(t *testing.T) {
+			for i, sql := range sqls {
+				t.Run(shortName(i, sql), func(t *testing.T) {
+					res, err := d.BuildDigestANTLR(sql, opt)
+					if err != nil {
+						t.Fatalf("[%s #%d] build error: %v\nsql=%s", name, i, err, sql)
+					}
+					// 基本健康检查
+					if strings.TrimSpace(res.Digest) == "" {
+						t.Fatalf("[%s #%d] empty digest\nsql=%s", name, i, sql)
+					}
+					//// 不应以多余右括号结尾
+					//if strings.HasSuffix(strings.TrimSpace(res.Digest), ")") {
+					//	t.Fatalf("[%s #%d] digest ends with stray ')': %q\nsql=%s", name, i, res.Digest, sql)
+					//}
+					// 参数切片位置有效
+					for pi, p := range res.Params {
+						if !(p.Start >= 0 && p.End > p.Start && p.End <= len(sql)) {
+							t.Fatalf("[%s #%d] param #%d invalid range: [%d,%d) len=%d\nsql=%s",
+								name, i, pi+1, p.Start, p.End, len(sql), sql)
+						}
+						if sql[p.Start:p.End] != p.Value {
+							t.Fatalf("[%s #%d] param #%d value mismatch: got slice=%q vs p.Value=%q\nsql=%s",
+								name, i, pi+1, sql[p.Start:p.End], p.Value, sql)
+						}
+					}
+					if testing.Verbose() {
+						t.Logf("[%s #%d]\nSQL   : %s\nDigest: %s\nParams: %v\n",
+							name, i, singleLine(sql), res.Digest, res.Params)
+					}
+				})
+			}
+		})
+	}
+
+	// 跑四大方言（默认不参数化时间函数，但保留 VALUES 折叠）
+	runCorpus("MySQL", d.MySQL, corpusMySQL, d.Options{Dialect: d.MySQL, CollapseValuesInDigest: true})
+	runCorpus("Postgres", d.Postgres, corpusPG, d.Options{Dialect: d.Postgres, CollapseValuesInDigest: true})
+	runCorpus("SQLServer", d.SQLServer, corpusMSSQL, d.Options{Dialect: d.SQLServer, CollapseValuesInDigest: true})
+	runCorpus("Oracle", d.Oracle, corpusOracle, d.Options{Dialect: d.Oracle, CollapseValuesInDigest: true})
+}
+
 func assertRowColGrid(t *testing.T, params []d.ExParam, rows, cols int) {
 	t.Helper()
 	if rows <= 0 || cols <= 0 {
@@ -1487,4 +1616,17 @@ func assertRowColGrid(t *testing.T, params []d.ExParam, rows, cols int) {
 			t.Fatalf("Row %d cols=%d want %d", r, rowCount[r], cols)
 		}
 	}
+}
+
+/************** helpers **************/
+
+func shortName(i int, sql string) string {
+	sql = strings.TrimSpace(sql)
+	if len(sql) > 48 {
+		sql = sql[:48] + "..."
+	}
+	return strings.ReplaceAll(sql, "\n", " ")
+}
+func singleLine(s string) string {
+	return strings.Join(strings.Fields(s), " ")
 }
