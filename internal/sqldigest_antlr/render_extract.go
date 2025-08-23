@@ -305,37 +305,26 @@ func renderAndExtract(original string, toks []antlr.Token, opt Options) (string,
 		}
 
 		// —— 时间函数作为参数（可选） ——（NOW(), GETDATE(), CURRENT_DATE 等）
+		// 只识别“局部安全模式”，避免跨越 tuple 边界。
 		if opt.ParamizeTimeFuncs {
 			up := strings.ToUpper(text)
-			if kind, isTime := timeFuncs[up]; isTime {
-				// 可能是无参函数（NOW()）或关键字（CURRENT_DATE）
-				if nv, _ := nextVisible(i); nv != nil && nv.GetText() == "(" {
-					// 消费到配对的 ")"
-					depth := 0
-					endIdx := -1
-					for j := i + 1; j < len(toks); j++ {
-						tj := toks[j]
-						if isEOFToken(tj) {
-							break
-						}
-						if tj.GetChannel() != antlr.TokenDefaultChannel {
-							continue
-						}
-						switch tj.GetText() {
-						case "(":
-							depth++
-						case ")":
-							depth--
-							if depth == 0 {
-								endIdx = j
-								break
-							}
-						}
-					}
-					if endIdx != -1 {
+			kind, isTime := timeFuncs[up]
+			if isTime {
+				// helper: 取从 idx 开始的“下一个可见 token”
+				nextTok := func(idx int) (antlr.Token, int) {
+					return nextVisible(idx)
+				}
+
+				// 1) 关键字无括号：SYSDATE / SYSTIMESTAMP / CURRENT_DATE / CURRENT_TIME / CURRENT_TIMESTAMP
+				// 直接参数化当前 token 本身
+				// 注意：有些方言允许 CURRENT_TIMESTAMP(3)，这种在下面 2) 识别
+				if up == "SYSDATE" || up == "SYSTIMESTAMP" || up == "CURRENT_DATE" || up == "CURRENT_TIME" || up == "CURRENT_TIMESTAMP" {
+					nv1, _ := nextTok(i)
+					// 若后面不是 "("，当作无括号关键字处理
+					if nv1 == nil || nv1.GetText() != "(" {
 						needSpaceBeforeWord()
 						startByte := runeIndexToByte(original, t.GetStart())
-						endByte := runeIndexToByte(original, toks[endIdx].GetStop()+1)
+						endByte := runeIndexToByte(original, t.GetStop()+1)
 						params = append(params, ExParam{
 							Index: iParam, Type: kind,
 							Value: original[startByte:endByte],
@@ -345,27 +334,59 @@ func renderAndExtract(original string, toks []antlr.Token, opt Options) (string,
 						if !suppressOut {
 							out.WriteString("?")
 						}
-						i = endIdx
 						prevWord = ""
 						continue
 					}
-				} else {
-					// 无括号形式：CURRENT_DATE / SYSDATE
-					needSpaceBeforeWord()
-					startByte := runeIndexToByte(original, t.GetStart())
-					endByte := runeIndexToByte(original, t.GetStop()+1)
-					params = append(params, ExParam{
-						Index: iParam, Type: kind,
-						Value: original[startByte:endByte],
-						Start: startByte, End: endByte,
-					})
-					iParam++
-					if !suppressOut {
-						out.WriteString("?")
-					}
-					prevWord = ""
-					continue
+					// 如果后面是 "("，落到 2) 的分支处理（例如 CURRENT_TIMESTAMP(3)）
 				}
+
+				// 2) 零参括号：NOW() / GETDATE() / GETUTCDATE() / SYSDATETIME() / SYSUTCDATETIME() / UTC_TIMESTAMP()
+				// 仅接受“(” 紧跟 “)”
+				if nv1, idx1 := nextTok(i); nv1 != nil && nv1.GetText() == "(" {
+					if nv2, idx2 := nextTok(idx1); nv2 != nil {
+						// 2.a) 零参：func ( )
+						if nv2.GetText() == ")" {
+							needSpaceBeforeWord()
+							startByte := runeIndexToByte(original, t.GetStart())
+							endByte := runeIndexToByte(original, nv2.GetStop()+1)
+							params = append(params, ExParam{
+								Index: iParam, Type: kind,
+								Value: original[startByte:endByte],
+								Start: startByte, End: endByte,
+							})
+							iParam++
+							if !suppressOut {
+								out.WriteString("?")
+							}
+							i = idx2 // 跳到 ')'
+							prevWord = ""
+							continue
+						}
+						// 2.b) 带精度：CURRENT_TIMESTAMP ( 3 ) / LOCALTIMESTAMP ( 6 ) / CURRENT_TIME ( 2 )
+						// 仅接受一个“纯数字 token” + 右括号
+						if isNumberLiteral(nv2.GetText()) {
+							if nv3, idx3 := nextTok(idx2); nv3 != nil && nv3.GetText() == ")" {
+								needSpaceBeforeWord()
+								startByte := runeIndexToByte(original, t.GetStart())
+								endByte := runeIndexToByte(original, nv3.GetStop()+1)
+								params = append(params, ExParam{
+									Index: iParam, Type: kind,
+									Value: original[startByte:endByte],
+									Start: startByte, End: endByte,
+								})
+								iParam++
+								if !suppressOut {
+									out.WriteString("?")
+								}
+								i = idx3 // 跳到 ')'
+								prevWord = ""
+								continue
+							}
+						}
+					}
+					// 其它形态（例如带表达式、含逗号等）不参数化，交由常规渲染，防误吃
+				}
+				// 若既非无括号关键字，也非上述两种括号安全模式，则不参数化
 			}
 		}
 
