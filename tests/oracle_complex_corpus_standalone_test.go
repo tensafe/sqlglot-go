@@ -2,9 +2,9 @@ package tests
 
 import (
 	"fmt"
+	d "github.com/tensafe/sqlglot-go/internal/sqldigest_antlr"
 	"strings"
 	"testing"
-	d "tsql_digest_v4/internal/sqldigest_antlr"
 )
 
 //go test -v -count=1 . -run Oracle_Complex_Corpus_Standalone_ORA

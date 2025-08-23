@@ -4,9 +4,9 @@ package tests
 
 import (
 	"github.com/antlr4-go/antlr/v4"
+	d "github.com/tensafe/sqlglot-go/internal/sqldigest_antlr"
 	"regexp"
 	"strings"
-	d "tsql_digest_v4/internal/sqldigest_antlr"
 	"unicode/utf8"
 )
 
@@ -36,8 +36,8 @@ import (
 //		if t == nil || t.GetTokenType() == antlr.TokenEOF {
 //			break
 //		}
-//		startByte := runeIndexToByte(sql, t.GetStart())
-//		endByte := runeIndexToByte(sql, t.GetStop()+1)
+//		startByte := RuneIndexToByte(sql, t.GetStart())
+//		endByte := RuneIndexToByte(sql, t.GetStop()+1)
 //
 //		text := t.GetText()
 //		ch := t.GetChannel()
@@ -113,7 +113,7 @@ func isStringLiteralToken(text string, di d.Dialect) bool {
 
 var rePGDollar = regexp.MustCompile(`^\$[A-Za-z_0-9]*\$$`)
 
-func runeIndexToByte(s string, runeIdx int) int {
+func RuneIndexToByte(s string, runeIdx int) int {
 	if runeIdx <= 0 {
 		return 0
 	}

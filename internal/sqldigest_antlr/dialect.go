@@ -2,15 +2,15 @@ package sqldigest_antlr
 
 import (
 	"fmt"
+	ollex "github.com/tensafe/sqlglot-go/internal/parsers/plsql"
 	"sort"
 	"strings"
-	ollex "tsql_digest_v4/internal/parsers/plsql"
 
 	"github.com/antlr4-go/antlr/v4"
 
-	mylex "tsql_digest_v4/internal/parsers/mysql"
-	pglex "tsql_digest_v4/internal/parsers/postgresql"
-	tsllex "tsql_digest_v4/internal/parsers/tsql"
+	mylex "github.com/tensafe/sqlglot-go/internal/parsers/mysql"
+	pglex "github.com/tensafe/sqlglot-go/internal/parsers/postgresql"
+	tsllex "github.com/tensafe/sqlglot-go/internal/parsers/tsql"
 )
 
 // Dialect 支持的方言
@@ -29,15 +29,6 @@ type Options struct {
 	ParamizeTimeFuncs      bool // 是否把 NOW()/CURRENT_DATE 等也参数化（默认 false）
 	CollapseValuesInDigest bool
 }
-
-// ExParam 抽取到的参数
-//type ExParam struct {
-//	Index int
-//	Type  string // Number|String|Bool|Null|Date|Time|Timestamp|Interval|Bind|NamedBind
-//	Value string // 原文（未解码）
-//	Start int    // 原 SQL 的字节起点（含）
-//	End   int    // 原 SQL 的字节终点（不含）
-//}
 
 type ExParam struct {
 	Index int
@@ -90,7 +81,7 @@ func BuildDigestANTLR(sql string, opt Options) (Result, error) {
 	tokens.Fill()
 
 	// 基于可见 token 渲染 digest 并抽参（原文+位置）
-	digest, params := renderAndExtract(sql, tokens.GetAllTokens(), opt)
+	digest, params := RenderAndExtract(sql, tokens.GetAllTokens(), opt)
 	// 新增：如是 INSERT ... VALUES(...)，为每个参数标上 Row/Col
 	annotateInsertRowCol(sql, opt.Dialect, &params)
 	return Result{Digest: digest, Params: params}, nil
@@ -139,13 +130,13 @@ func annotateInsertRowCol(original string, dialect Dialect, params *[]ExParam) {
 	nextVis := func(i int) antlr.Token {
 		for j := i + 1; j < len(all); j++ {
 			t := all[j]
-			if isEOFToken(t) {
+			if IsEOFToken(t) {
 				return nil
 			}
 			if t.GetChannel() != antlr.TokenDefaultChannel {
 				continue
 			}
-			if isWhitespace(t.GetText()) {
+			if IsWhitespace(t.GetText()) {
 				continue
 			}
 			return t
@@ -155,7 +146,7 @@ func annotateInsertRowCol(original string, dialect Dialect, params *[]ExParam) {
 
 	for i := 0; i < len(all); i++ {
 		t := all[i]
-		if isEOFToken(t) {
+		if IsEOFToken(t) {
 			break
 		}
 		if t.GetChannel() != antlr.TokenDefaultChannel {
@@ -189,8 +180,8 @@ func annotateInsertRowCol(original string, dialect Dialect, params *[]ExParam) {
 			depth--
 			if depth == 0 && tupleStartRune >= 0 {
 				// 一个顶层元组结束
-				s := runeIndexToByte(original, tupleStartRune)
-				e := runeIndexToByte(original, t.GetStop()+1)
+				s := RuneIndexToByte(original, tupleStartRune)
+				e := RuneIndexToByte(original, t.GetStop()+1)
 				ranges = append(ranges, rng{s: s, e: e})
 				tupleStartRune = -1
 

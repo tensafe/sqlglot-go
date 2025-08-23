@@ -2,11 +2,11 @@ package tests
 
 import (
 	"fmt"
+	d "github.com/tensafe/sqlglot-go/internal/sqldigest_antlr"
 	"math/rand"
 	"regexp"
 	"strconv"
 	"strings"
-	d "tsql_digest_v4/internal/sqldigest_antlr"
 	"unicode/utf8"
 )
 

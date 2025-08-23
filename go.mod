@@ -1,4 +1,4 @@
-module tsql_digest_v4
+module github.com/tensafe/sqlglot-go
 
 go 1.24
 

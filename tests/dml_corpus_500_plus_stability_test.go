@@ -2,13 +2,13 @@ package tests
 
 import (
 	"fmt"
+	d "github.com/tensafe/sqlglot-go/internal/sqldigest_antlr"
 	"math/rand"
 	"os"
 	"regexp"
 	"strconv"
 	"strings"
 	"testing"
-	d "tsql_digest_v4/internal/sqldigest_antlr"
 )
 
 //go test -v -count=1 . -run DML_Corpus_500_Plus

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	d "tsql_digest_v4/internal/sqldigest_antlr"
+	d "github.com/tensafe/sqlglot-go/internal/sqldigest_antlr"
 )
 
 func Test_Smoke_MySQL(t *testing.T) {

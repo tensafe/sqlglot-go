@@ -2,9 +2,9 @@ package tests
 
 import (
 	"fmt"
+	d "github.com/tensafe/sqlglot-go/internal/sqldigest_antlr"
 	"strings"
 	"testing"
-	d "tsql_digest_v4/internal/sqldigest_antlr"
 )
 
 // 仅测试“调用”，避免与现有大用例冲突：函数名、Helper 名都后缀 SP。

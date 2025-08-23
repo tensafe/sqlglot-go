@@ -4,14 +4,33 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="244f0234-c40c-4235-a81c-3f75251e0bac" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/.idea/.gitignore" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/misc.xml" afterDir="false" />
+    <list default="true" id="244f0234-c40c-4235-a81c-3f75251e0bac" name="Changes" comment="增加各种变态sql的检测">
+      <change afterPath="$PROJECT_DIR$/.gitignore" afterDir="false" />
       <change afterPath="$PROJECT_DIR$/.idea/modules.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/vcs.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/go.mod" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/go.sum" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/main.go" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/.idea/sqlglot-go.iml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/cmd/main.go" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/sqlglot-go.iml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/sqlglot/api.go" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/sqlglot/dialect.go" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/sqlglot/doc.go" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/go.mod" beforeDir="false" afterPath="$PROJECT_DIR$/go.mod" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/go.sum" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/sqldigest_antlr/driver.go" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/sqldigest_antlr/render_extract.go" beforeDir="false" afterPath="$PROJECT_DIR$/internal/sqldigest_antlr/render_extract.go" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/sqldigest_antlr/token_utils.go" beforeDir="false" afterPath="$PROJECT_DIR$/internal/sqldigest_antlr/token_utils.go" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/main.go" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/digest_smoke_test.go" beforeDir="false" afterPath="$PROJECT_DIR$/tests/digest_smoke_test.go" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/dml_corpus_500_plus_stability_test.go" beforeDir="false" afterPath="$PROJECT_DIR$/tests/dml_corpus_500_plus_stability_test.go" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/dml_corpus_500_test.go" beforeDir="false" afterPath="$PROJECT_DIR$/tests/dml_corpus_500_test.go" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/oracle_complex_corpus_standalone_test.go" beforeDir="false" afterPath="$PROJECT_DIR$/tests/oracle_complex_corpus_standalone_test.go" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/proc_calls_smoke_test.go" beforeDir="false" afterPath="$PROJECT_DIR$/tests/proc_calls_smoke_test.go" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/sql_corpus_100_test.go" beforeDir="false" afterPath="$PROJECT_DIR$/tests/sql_corpus_100_test.go" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/sql_corpus_extreme_test.go" beforeDir="false" afterPath="$PROJECT_DIR$/tests/sql_corpus_extreme_test.go" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/sql_corpus_nested_heavy_test.go" beforeDir="false" afterPath="$PROJECT_DIR$/tests/sql_corpus_nested_heavy_test.go" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/utils_bindfuzz_antlr.go" beforeDir="false" afterPath="$PROJECT_DIR$/tests/utils_bindfuzz_antlr.go" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/utils_bindfuzz_text.go" beforeDir="false" afterPath="$PROJECT_DIR$/tests/utils_bindfuzz_text.go" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tsql_digest_v4.iml" beforeDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -29,21 +48,25 @@
   <component name="Git.Settings">
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
   </component>
-  <component name="GitHubPullRequestSearchHistory"><![CDATA[{
-  "lastFilter": {
-    "state": "OPEN",
-    "assignee": "tensafe"
+  <component name="GitHubPullRequestSearchHistory">{
+  &quot;lastFilter&quot;: {
+    &quot;state&quot;: &quot;OPEN&quot;,
+    &quot;assignee&quot;: &quot;tensafe&quot;
   }
-}]]></component>
-  <component name="GithubPullRequestsUISettings"><![CDATA[{
-  "selectedUrlAndAccountId": {
-    "url": "https://github.com/antlr/grammars-v4.git",
-    "accountId": "84749379-66bc-4ed7-8490-24f40f5b2196"
+}</component>
+  <component name="GithubPullRequestsUISettings">{
+  &quot;selectedUrlAndAccountId&quot;: {
+    &quot;url&quot;: &quot;https://github.com/antlr/grammars-v4.git&quot;,
+    &quot;accountId&quot;: &quot;84749379-66bc-4ed7-8490-24f40f5b2196&quot;
   }
+}</component>
+  <component name="KubernetesApiPersistence"><![CDATA[{}]]></component>
+  <component name="KubernetesApiProvider"><![CDATA[{
+  "isMigrated": true
 }]]></component>
-  <component name="ProjectColorInfo"><![CDATA[{
-  "associatedIndex": 7
-}]]></component>
+  <component name="ProjectColorInfo">{
+  &quot;associatedIndex&quot;: 7
+}</component>
   <component name="ProjectId" id="31f58MrOGr9S0kkTFZhaFbEb6R3" />
   <component name="ProjectViewState">
     <option name="hideEmptyMiddlePackages" value="true" />
@@ -52,24 +75,67 @@
   <component name="PropertiesComponent"><![CDATA[{
   "keyToString": {
     "DefaultGoTemplateProperty": "Go File",
-    "Go Test.Test_Smoke_MySQL in tsql_digest_v4/tests.executor": "Run",
-    "Go Test.Test_Smoke_Oracle in tsql_digest_v4/tests.executor": "Run",
-    "Go Test.Test_Smoke_Postgres in tsql_digest_v4/tests.executor": "Run",
-    "Go Test.Test_Smoke_SQLServer in tsql_digest_v4/tests.executor": "Run",
+    "Go Build.go build github.com/tensafe/sqlglot-go/cmd.executor": "Run",
+    "Go Build.go build sqlglot-go.executor": "Run",
+    "Go Test.Test_Corpus_Extreme_Mixed in sqlglot-go/tests.executor": "Run",
+    "Go Test.Test_Corpus_Extreme_Mixed/MySQL_partition_generated_virtual in sqlglot-go/tests.executor": "Debug",
+    "Go Test.Test_Corpus_More in sqlglot-go/tests.executor": "Run",
+    "Go Test.Test_Freak_MySQL_Insert_Select_Union_OrderLimit in sqlglot-go/tests.executor": "Run",
+    "Go Test.Test_Freak_MySQL_MixedBinds_DisableCollapse in sqlglot-go/tests.executor": "Run",
+    "Go Test.Test_Freak_MySQL_VersionedComment_MultiStmt in sqlglot-go/tests.executor": "Run",
+    "Go Test.Test_Freak_PG_Filter_DistinctOn_ArrayAny in sqlglot-go/tests.executor": "Run",
+    "Go Test.Test_Freak_PG_Interval_And_Casts in sqlglot-go/tests.executor": "Run",
+    "Go Test.Test_Insert_MySQL_Multi in sqlglot-go/tests.executor": "Run",
+    "Go Test.Test_Insert_MySQL_Single in sqlglot-go/tests.executor": "Run",
+    "Go Test.Test_Insert_Oracle_InsertAll in sqlglot-go/tests.executor": "Run",
+    "Go Test.Test_Insert_Oracle_Multi in sqlglot-go/tests.executor": "Run",
+    "Go Test.Test_Insert_Oracle_Single in sqlglot-go/tests.executor": "Run",
+    "Go Test.Test_Insert_Postgres_Multi in sqlglot-go/tests.executor": "Run",
+    "Go Test.Test_Insert_Postgres_Single in sqlglot-go/tests.executor": "Run",
+    "Go Test.Test_Insert_SQLServer_Multi in sqlglot-go/tests.executor": "Debug",
+    "Go Test.Test_Insert_SQLServer_Single in sqlglot-go/tests.executor": "Run",
+    "Go Test.Test_MySQL_Insert_Multi_NoCollapse_ParamizeTime in sqlglot-go/tests.executor": "Run",
+    "Go Test.Test_MySQL_Insert_Multi_NoCollapse_ParamizeTimeFuncsOn in sqlglot-go/tests.executor": "Debug",
+    "Go Test.Test_MySQL_MultiStatements_SanitizeParen in sqlglot-go/tests.executor": "Run",
+    "Go Test.Test_MySQL_OnDuplicateKey_Update_NamedBind in sqlglot-go/tests.executor": "Run",
+    "Go Test.Test_MySQL_OnDuplicateKey_Update_ValuesRef in sqlglot-go/tests.executor": "Run",
+    "Go Test.Test_Oracle_Complex_Corpus_Standalone_ORA in sqlglot-go/tests.executor": "Run",
+    "Go Test.Test_Oracle_InsertAll_MultiRows in sqlglot-go/tests.executor": "Run",
+    "Go Test.Test_Oracle_Select_Basics in sqlglot-go/tests.executor": "Run",
+    "Go Test.Test_PG_Array_Literal in sqlglot-go/tests.executor": "Run",
+    "Go Test.Test_PG_Delete_Using_Returning in sqlglot-go/tests.executor": "Run",
+    "Go Test.Test_PG_MultiStatements_Sanitize in sqlglot-go/tests.executor": "Run",
+    "Go Test.Test_PG_Upsert_OnConflict in sqlglot-go/tests.executor": "Run",
+    "Go Test.Test_PG_With_CTE_Window in sqlglot-go/tests.executor": "Run",
+    "Go Test.Test_PG_With_Recursive in sqlglot-go/tests.executor": "Run",
+    "Go Test.Test_SQLServer_Delete_Top_WithHint in sqlglot-go/tests.executor": "Run",
+    "Go Test.Test_SQLServer_MultiStatements_SanitizeParen in sqlglot-go/tests.executor": "Run",
+    "Go Test.Test_SQLServer_Select_Top_And_Brackets in sqlglot-go/tests.executor": "Run",
+    "Go Test.Test_Smoke_MySQL in sqlglot-go/tests.executor": "Run",
+    "Go Test.Test_Smoke_Oracle in sqlglot-go/tests.executor": "Run",
+    "Go Test.Test_Smoke_Postgres in sqlglot-go/tests.executor": "Run",
+    "Go Test.Test_Smoke_SQLServer in sqlglot-go/tests.executor": "Run",
+    "Go Test.digest_smoke_test.go.executor": "Run",
+    "Go Test.dml_corpus_500_test.go.executor": "Run",
+    "Go Test.sql_corpus_100_test.go.executor": "Run",
+    "Go Test.sql_corpus_extreme_test.go.executor": "Run",
+    "Go Test.sql_corpus_nested_heavy_test.go.executor": "Run",
     "ModuleVcsDetector.initialDetectionPerformed": "true",
     "RunOnceActivity.ShowReadmeOnStart": "true",
     "RunOnceActivity.git.unshallow": "true",
     "RunOnceActivity.go.formatter.settings.were.checked": "true",
     "RunOnceActivity.go.migrated.go.modules.settings": "true",
+    "SHARE_PROJECT_CONFIGURATION_FILES": "true",
     "git-widget-placeholder": "master",
     "go.import.settings.migrated": "true",
-    "last_opened_file_path": "/Users/tensafe/code/tsql_digest_v4/internal/parsers/mysql",
+    "last_opened_file_path": "/Users/tensafe/code/sqlglot-go/internal/parsers/mysql",
     "node.js.detected.package.eslint": "true",
     "node.js.detected.package.tslint": "true",
     "node.js.selected.package.eslint": "(autodetect)",
     "node.js.selected.package.tslint": "(autodetect)",
     "nodejs_package_manager_path": "npm",
-    "onboarding.tips.debug.path": "/Users/tensafe/code/tsql_digest_v4/main.go",
+    "onboarding.tips.debug.path": "/Users/tensafe/code/sqlglot-go/main.go",
+    "run.configurations.included.in.services": "true",
     "vue.rearranger.settings.migration": "true"
   }
 }]]></component>
@@ -80,62 +146,81 @@
       <recent name="$PROJECT_DIR$/internal/parsers/plsql" />
       <recent name="$PROJECT_DIR$/tools" />
     </key>
+    <key name="MoveFile.RECENT_KEYS">
+      <recent name="$PROJECT_DIR$/internal/sqldigest_antlr" />
+      <recent name="$PROJECT_DIR$/sqlglot" />
+      <recent name="$PROJECT_DIR$/cmd" />
+    </key>
   </component>
-  <component name="RunManager" selected="Go Test.Test_Smoke_MySQL in tsql_digest_v4/tests">
-    <configuration name="Test_Smoke_MySQL in tsql_digest_v4/tests" type="GoTestRunConfiguration" factoryName="Go Test" temporary="true" nameIsGenerated="true">
-      <module name="tsql_digest_v4" />
-      <working_directory value="$PROJECT_DIR$/tests" />
-      <root_directory value="$PROJECT_DIR$" />
+  <component name="RunDashboard">
+    <option name="configurationTypes">
+      <set>
+        <option value="GoApplicationRunConfiguration" />
+        <option value="KtorApplicationConfigurationType" />
+        <option value="MicronautRunConfigurationType" />
+        <option value="QuarkusRunConfigurationType" />
+        <option value="SpringBootApplicationConfigurationType" />
+      </set>
+    </option>
+  </component>
+  <component name="RunManager" selected="Go Test.sql_corpus_nested_heavy_test.go">
+    <configuration name="go build github.com/tensafe/sqlglot-go/cmd" type="GoApplicationRunConfiguration" factoryName="Go Application" temporary="true" nameIsGenerated="true">
+      <module name="sqlglot-go" />
+      <working_directory value="$PROJECT_DIR$" />
       <kind value="PACKAGE" />
-      <package value="tsql_digest_v4/tests" />
+      <package value="github.com/tensafe/sqlglot-go/cmd" />
       <directory value="$PROJECT_DIR$" />
-      <filePath value="$PROJECT_DIR$" />
-      <framework value="gotest" />
-      <pattern value="^\QTest_Smoke_MySQL\E$" />
+      <filePath value="$PROJECT_DIR$/cmd/main.go" />
       <method v="2" />
     </configuration>
-    <configuration name="Test_Smoke_Oracle in tsql_digest_v4/tests" type="GoTestRunConfiguration" factoryName="Go Test" temporary="true" nameIsGenerated="true">
-      <module name="tsql_digest_v4" />
-      <working_directory value="$PROJECT_DIR$/tests" />
-      <root_directory value="$PROJECT_DIR$" />
+    <configuration name="go build sqlglot-go" type="GoApplicationRunConfiguration" factoryName="Go Application" temporary="true" nameIsGenerated="true">
+      <module name="sqlglot-go" />
+      <working_directory value="$PROJECT_DIR$" />
       <kind value="PACKAGE" />
-      <package value="tsql_digest_v4/tests" />
+      <package value="sqlglot-go" />
       <directory value="$PROJECT_DIR$" />
-      <filePath value="$PROJECT_DIR$" />
-      <framework value="gotest" />
-      <pattern value="^\QTest_Smoke_Oracle\E$" />
+      <filePath value="$PROJECT_DIR$/main.go" />
       <method v="2" />
     </configuration>
-    <configuration name="Test_Smoke_Postgres in tsql_digest_v4/tests" type="GoTestRunConfiguration" factoryName="Go Test" temporary="true" nameIsGenerated="true">
-      <module name="tsql_digest_v4" />
+    <configuration name="Test_Oracle_Complex_Corpus_Standalone_ORA in sqlglot-go/tests" type="GoTestRunConfiguration" factoryName="Go Test" temporary="true" nameIsGenerated="true">
+      <module name="sqlglot-go" />
       <working_directory value="$PROJECT_DIR$/tests" />
       <root_directory value="$PROJECT_DIR$" />
       <kind value="PACKAGE" />
-      <package value="tsql_digest_v4/tests" />
+      <package value="sqlglot-go/tests" />
       <directory value="$PROJECT_DIR$" />
       <filePath value="$PROJECT_DIR$" />
       <framework value="gotest" />
-      <pattern value="^\QTest_Smoke_Postgres\E$" />
+      <pattern value="^\QTest_Oracle_Complex_Corpus_Standalone_ORA\E$" />
       <method v="2" />
     </configuration>
-    <configuration name="Test_Smoke_SQLServer in tsql_digest_v4/tests" type="GoTestRunConfiguration" factoryName="Go Test" temporary="true" nameIsGenerated="true">
-      <module name="tsql_digest_v4" />
+    <configuration name="digest_smoke_test.go" type="GoTestRunConfiguration" factoryName="Go Test" temporary="true" nameIsGenerated="true">
+      <module name="sqlglot-go" />
       <working_directory value="$PROJECT_DIR$/tests" />
       <root_directory value="$PROJECT_DIR$" />
-      <kind value="PACKAGE" />
-      <package value="tsql_digest_v4/tests" />
+      <kind value="FILE" />
       <directory value="$PROJECT_DIR$" />
-      <filePath value="$PROJECT_DIR$" />
+      <filePath value="$PROJECT_DIR$/tests/digest_smoke_test.go" />
       <framework value="gotest" />
-      <pattern value="^\QTest_Smoke_SQLServer\E$" />
+      <method v="2" />
+    </configuration>
+    <configuration name="sql_corpus_nested_heavy_test.go" type="GoTestRunConfiguration" factoryName="Go Test" temporary="true" nameIsGenerated="true">
+      <module name="sqlglot-go" />
+      <working_directory value="$PROJECT_DIR$/tests" />
+      <root_directory value="$PROJECT_DIR$" />
+      <kind value="FILE" />
+      <directory value="$PROJECT_DIR$" />
+      <filePath value="$PROJECT_DIR$/tests/sql_corpus_nested_heavy_test.go" />
+      <framework value="gotest" />
       <method v="2" />
     </configuration>
     <recent_temporary>
       <list>
-        <item itemvalue="Go Test.Test_Smoke_MySQL in tsql_digest_v4/tests" />
-        <item itemvalue="Go Test.Test_Smoke_Postgres in tsql_digest_v4/tests" />
-        <item itemvalue="Go Test.Test_Smoke_Oracle in tsql_digest_v4/tests" />
-        <item itemvalue="Go Test.Test_Smoke_SQLServer in tsql_digest_v4/tests" />
+        <item itemvalue="Go Test.sql_corpus_nested_heavy_test.go" />
+        <item itemvalue="Go Test.digest_smoke_test.go" />
+        <item itemvalue="Go Build.go build github.com/tensafe/sqlglot-go/cmd" />
+        <item itemvalue="Go Build.go build sqlglot-go" />
+        <item itemvalue="Go Test.Test_Oracle_Complex_Corpus_Standalone_ORA in sqlglot-go/tests" />
       </list>
     </recent_temporary>
   </component>
@@ -154,12 +239,136 @@
       <option name="number" value="Default" />
       <option name="presentableId" value="Default" />
       <updated>1755902127185</updated>
-      <workItem from="1755902128210" duration="6419000" />
+      <workItem from="1755902128210" duration="19737000" />
+      <workItem from="1755935725632" duration="1421000" />
     </task>
+    <task id="LOCAL-00001" summary="增加插入sql的处理">
+      <option name="closed" value="true" />
+      <created>1755910799867</created>
+      <option name="number" value="00001" />
+      <option name="presentableId" value="LOCAL-00001" />
+      <option name="project" value="LOCAL" />
+      <updated>1755910799867</updated>
+    </task>
+    <task id="LOCAL-00002" summary="增加插入sql的处理">
+      <option name="closed" value="true" />
+      <created>1755912170070</created>
+      <option name="number" value="00002" />
+      <option name="presentableId" value="LOCAL-00002" />
+      <option name="project" value="LOCAL" />
+      <updated>1755912170070</updated>
+    </task>
+    <task id="LOCAL-00003" summary="增加oracle测试用例">
+      <option name="closed" value="true" />
+      <created>1755912508197</created>
+      <option name="number" value="00003" />
+      <option name="presentableId" value="LOCAL-00003" />
+      <option name="project" value="LOCAL" />
+      <updated>1755912508197</updated>
+    </task>
+    <task id="LOCAL-00004" summary="修复提取参数bug">
+      <option name="closed" value="true" />
+      <created>1755913217251</created>
+      <option name="number" value="00004" />
+      <option name="presentableId" value="LOCAL-00004" />
+      <option name="project" value="LOCAL" />
+      <updated>1755913217251</updated>
+    </task>
+    <task id="LOCAL-00005" summary="增加各种变态sql的检测">
+      <option name="closed" value="true" />
+      <created>1755913972095</created>
+      <option name="number" value="00005" />
+      <option name="presentableId" value="LOCAL-00005" />
+      <option name="project" value="LOCAL" />
+      <updated>1755913972095</updated>
+    </task>
+    <task id="LOCAL-00006" summary="增加各种变态sql的检测">
+      <option name="closed" value="true" />
+      <created>1755914247577</created>
+      <option name="number" value="00006" />
+      <option name="presentableId" value="LOCAL-00006" />
+      <option name="project" value="LOCAL" />
+      <updated>1755914247577</updated>
+    </task>
+    <task id="LOCAL-00007" summary="增加各种变态sql的检测">
+      <option name="closed" value="true" />
+      <created>1755929060600</created>
+      <option name="number" value="00007" />
+      <option name="presentableId" value="LOCAL-00007" />
+      <option name="project" value="LOCAL" />
+      <updated>1755929060600</updated>
+    </task>
+    <task id="LOCAL-00008" summary="增加各种变态sql的检测">
+      <option name="closed" value="true" />
+      <created>1755929062892</created>
+      <option name="number" value="00008" />
+      <option name="presentableId" value="LOCAL-00008" />
+      <option name="project" value="LOCAL" />
+      <updated>1755929062892</updated>
+    </task>
+    <task id="LOCAL-00009" summary="增加各种变态sql的检测">
+      <option name="closed" value="true" />
+      <created>1755929826462</created>
+      <option name="number" value="00009" />
+      <option name="presentableId" value="LOCAL-00009" />
+      <option name="project" value="LOCAL" />
+      <updated>1755929826462</updated>
+    </task>
+    <task id="LOCAL-00010" summary="增加各种变态sql的检测">
+      <option name="closed" value="true" />
+      <created>1755932067269</created>
+      <option name="number" value="00010" />
+      <option name="presentableId" value="LOCAL-00010" />
+      <option name="project" value="LOCAL" />
+      <updated>1755932067269</updated>
+    </task>
+    <task id="LOCAL-00011" summary="增加各种变态sql的检测">
+      <option name="closed" value="true" />
+      <created>1755932851357</created>
+      <option name="number" value="00011" />
+      <option name="presentableId" value="LOCAL-00011" />
+      <option name="project" value="LOCAL" />
+      <updated>1755932851357</updated>
+    </task>
+    <task id="LOCAL-00012" summary="增加各种变态sql的检测">
+      <option name="closed" value="true" />
+      <created>1755933186149</created>
+      <option name="number" value="00012" />
+      <option name="presentableId" value="LOCAL-00012" />
+      <option name="project" value="LOCAL" />
+      <updated>1755933186149</updated>
+    </task>
+    <task id="LOCAL-00013" summary="增加各种变态sql的检测">
+      <option name="closed" value="true" />
+      <created>1755933553638</created>
+      <option name="number" value="00013" />
+      <option name="presentableId" value="LOCAL-00013" />
+      <option name="project" value="LOCAL" />
+      <updated>1755933553638</updated>
+    </task>
+    <option name="localTasksCounter" value="14" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
     <option name="version" value="3" />
+  </component>
+  <component name="Vcs.Log.Tabs.Properties">
+    <option name="TAB_STATES">
+      <map>
+        <entry key="MAIN">
+          <value>
+            <State />
+          </value>
+        </entry>
+      </map>
+    </option>
+  </component>
+  <component name="VcsManagerConfiguration">
+    <MESSAGE value="增加插入sql的处理" />
+    <MESSAGE value="增加oracle测试用例" />
+    <MESSAGE value="修复提取参数bug" />
+    <MESSAGE value="增加各种变态sql的检测" />
+    <option name="LAST_COMMIT_MESSAGE" value="增加各种变态sql的检测" />
   </component>
   <component name="VgoProject">
     <settings-migrated>true</settings-migrated>
@@ -168,9 +377,9 @@
     <breakpoint-manager>
       <breakpoints>
         <line-breakpoint enabled="true" type="DlvLineBreakpoint">
-          <url>file://$PROJECT_DIR$/main.go</url>
-          <line>18</line>
-          <option name="timeStamp" value="1" />
+          <url>file://$PROJECT_DIR$/tests/digest_smoke_test.go</url>
+          <line>485</line>
+          <option name="timeStamp" value="4" />
         </line-breakpoint>
       </breakpoints>
     </breakpoint-manager>

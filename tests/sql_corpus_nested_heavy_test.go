@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	d "tsql_digest_v4/internal/sqldigest_antlr"
+	d "github.com/tensafe/sqlglot-go/internal/sqldigest_antlr"
 )
 
 type nestedItem struct {

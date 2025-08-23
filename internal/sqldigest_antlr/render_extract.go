@@ -51,7 +51,7 @@ var timeFuncs = map[string]string{
 
 // ---- 小工具 ----
 
-func isEOFToken(t antlr.Token) bool {
+func IsEOFToken(t antlr.Token) bool {
 	return t == nil || t.GetTokenType() == antlr.TokenEOF || t.GetText() == "<EOF>"
 }
 
@@ -61,7 +61,7 @@ func valuesSectionHasBind(toks []antlr.Token) bool {
 	depth := 0
 	for i := 0; i < len(toks); i++ {
 		t := toks[i]
-		if isEOFToken(t) {
+		if IsEOFToken(t) {
 			break
 		}
 		if t == nil || t.GetChannel() != antlr.TokenDefaultChannel {
@@ -102,7 +102,7 @@ func valuesSectionHasTimeFunc(toks []antlr.Token) bool {
 	depth := 0
 	for i := 0; i < len(toks); i++ {
 		t := toks[i]
-		if isEOFToken(t) {
+		if IsEOFToken(t) {
 			break
 		}
 		if t == nil || t.GetChannel() != antlr.TokenDefaultChannel {
@@ -245,7 +245,7 @@ func inAnySpan(startByte, endByte int, spans []span) bool {
 }
 
 // 主流程：把 token 流规范化渲染为 digest，并抽取参数
-func renderAndExtract(original string, toks []antlr.Token, opt Options) (string, []ExParam) {
+func RenderAndExtract(original string, toks []antlr.Token, opt Options) (string, []ExParam) {
 	var out strings.Builder
 	var params []ExParam
 	iParam := 1
@@ -328,19 +328,19 @@ func renderAndExtract(original string, toks []antlr.Token, opt Options) (string,
 	nextVisible := func(i int) (antlr.Token, int) {
 		for j := i + 1; j < len(toks); j++ {
 			t := toks[j]
-			if isEOFToken(t) {
+			if IsEOFToken(t) {
 				return nil, i
 			}
 			if t.GetChannel() != antlr.TokenDefaultChannel {
 				continue
 			}
-			if isWhitespace(t.GetText()) {
+			if IsWhitespace(t.GetText()) {
 				continue
 			}
 			// 注释过滤：下一个 token 若在注释区，继续往后找
 			if len(commentSpans) > 0 {
-				startByte := runeIndexToByte(original, t.GetStart())
-				endByte := runeIndexToByte(original, t.GetStop()+1)
+				startByte := RuneIndexToByte(original, t.GetStart())
+				endByte := RuneIndexToByte(original, t.GetStop()+1)
 				if inAnySpan(startByte, endByte, commentSpans) {
 					i = j
 					continue
@@ -353,21 +353,21 @@ func renderAndExtract(original string, toks []antlr.Token, opt Options) (string,
 
 	for i := 0; i < len(toks); i++ {
 		t := toks[i]
-		if isEOFToken(t) {
+		if IsEOFToken(t) {
 			break
 		}
 		if t.GetChannel() != antlr.TokenDefaultChannel {
 			continue
 		}
 		text := t.GetText()
-		if isWhitespace(text) {
+		if IsWhitespace(text) {
 			continue
 		}
 
 		// —— 注释过滤：当前 token 落在注释区间内则跳过 ——
 		if len(commentSpans) > 0 {
-			startByte := runeIndexToByte(original, t.GetStart())
-			endByte := runeIndexToByte(original, t.GetStop()+1)
+			startByte := RuneIndexToByte(original, t.GetStart())
+			endByte := RuneIndexToByte(original, t.GetStop()+1)
 			if inAnySpan(startByte, endByte, commentSpans) {
 				continue
 			}
@@ -379,8 +379,8 @@ func renderAndExtract(original string, toks []antlr.Token, opt Options) (string,
 				needSpaceBeforeWord()
 				startRune := t.GetStart()
 				endRune := nv.GetStop() + 1
-				startByte := runeIndexToByte(original, startRune)
-				endByte := runeIndexToByte(original, endRune)
+				startByte := RuneIndexToByte(original, startRune)
+				endByte := RuneIndexToByte(original, endRune)
 				params = append(params, ExParam{
 					Index: iParam, Type: kind,
 					Value: original[startByte:endByte],
@@ -402,7 +402,7 @@ func renderAndExtract(original string, toks []antlr.Token, opt Options) (string,
 			endIdx := -1
 			for j := i + 1; j < len(toks); j++ {
 				tj := toks[j]
-				if isEOFToken(tj) {
+				if IsEOFToken(tj) {
 					break
 				}
 				if tj == nil || tj.GetChannel() != antlr.TokenDefaultChannel {
@@ -415,8 +415,8 @@ func renderAndExtract(original string, toks []antlr.Token, opt Options) (string,
 			}
 			if endIdx != -1 {
 				needSpaceBeforeWord()
-				startByte := runeIndexToByte(original, t.GetStart())
-				endByte := runeIndexToByte(original, toks[endIdx].GetStop()+1)
+				startByte := RuneIndexToByte(original, t.GetStart())
+				endByte := RuneIndexToByte(original, toks[endIdx].GetStop()+1)
 				params = append(params, ExParam{
 					Index: iParam, Type: "String",
 					Value: original[startByte:endByte],
@@ -448,8 +448,8 @@ func renderAndExtract(original string, toks []antlr.Token, opt Options) (string,
 					nv1, _ := nextTok(i)
 					if nv1 == nil || nv1.GetText() != "(" {
 						needSpaceBeforeWord()
-						startByte := runeIndexToByte(original, t.GetStart())
-						endByte := runeIndexToByte(original, t.GetStop()+1)
+						startByte := RuneIndexToByte(original, t.GetStart())
+						endByte := RuneIndexToByte(original, t.GetStop()+1)
 						params = append(params, ExParam{
 							Index: iParam, Type: kind,
 							Value: original[startByte:endByte],
@@ -470,8 +470,8 @@ func renderAndExtract(original string, toks []antlr.Token, opt Options) (string,
 						// func()
 						if nv2.GetText() == ")" {
 							needSpaceBeforeWord()
-							startByte := runeIndexToByte(original, t.GetStart())
-							endByte := runeIndexToByte(original, nv2.GetStop()+1)
+							startByte := RuneIndexToByte(original, t.GetStart())
+							endByte := RuneIndexToByte(original, nv2.GetStop()+1)
 							params = append(params, ExParam{
 								Index: iParam, Type: kind,
 								Value: original[startByte:endByte],
@@ -489,8 +489,8 @@ func renderAndExtract(original string, toks []antlr.Token, opt Options) (string,
 						if isNumberLiteral(nv2.GetText()) {
 							if nv3, idx3 := nextTok(idx2); nv3 != nil && nv3.GetText() == ")" {
 								needSpaceBeforeWord()
-								startByte := runeIndexToByte(original, t.GetStart())
-								endByte := runeIndexToByte(original, nv3.GetStop()+1)
+								startByte := RuneIndexToByte(original, t.GetStart())
+								endByte := RuneIndexToByte(original, nv3.GetStop()+1)
 								params = append(params, ExParam{
 									Index: iParam, Type: kind,
 									Value: original[startByte:endByte],
@@ -685,8 +685,8 @@ func renderAndExtract(original string, toks []antlr.Token, opt Options) (string,
 func addParam(out *strings.Builder, suppress bool, arr *[]ExParam, iParam *int, original string, tok antlr.Token, typ string) {
 	startRune := tok.GetStart()
 	endRune := tok.GetStop() + 1
-	startByte := runeIndexToByte(original, startRune)
-	endByte := runeIndexToByte(original, endRune)
+	startByte := RuneIndexToByte(original, startRune)
+	endByte := RuneIndexToByte(original, endRune)
 
 	if !suppress {
 		out.WriteString("?")
@@ -792,13 +792,13 @@ func isDateLike(prevWord, curr, next string) (bool, string) {
 func peekText(toks []antlr.Token, i int) string {
 	for j := i; j < len(toks); j++ {
 		t := toks[j]
-		if isEOFToken(t) {
+		if IsEOFToken(t) {
 			return ""
 		}
 		if t.GetChannel() != antlr.TokenDefaultChannel {
 			continue
 		}
-		if isWhitespace(t.GetText()) {
+		if IsWhitespace(t.GetText()) {
 			continue
 		}
 		return t.GetText()
@@ -807,7 +807,7 @@ func peekText(toks []antlr.Token, i int) string {
 }
 
 // 将 antlr 的 rune 索引用到 UTF-8 字节索引
-func runeIndexToByte(s string, runeIdx int) int {
+func RuneIndexToByte(s string, runeIdx int) int {
 	if runeIdx <= 0 {
 		return 0
 	}
