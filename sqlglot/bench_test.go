@@ -98,6 +98,7 @@ func BenchmarkSignature_Parallel(b *testing.B) {
 			// 防止被编译器优化掉
 			sinkDigest = dig
 			sinkParams = params
+			fmt.Println(sinkParams, sinkDigest)
 		}
 	})
 }
