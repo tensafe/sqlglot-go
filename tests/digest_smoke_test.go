@@ -245,6 +245,192 @@ ON DUPLICATE KEY UPDATE
 	// 两条 INTO 各 4 个 → 共 8
 }
 
+func Test_Oracle_Select_Basics(t *testing.T) {
+	sql := `SELECT :id, 'x', DATE '2020-01-01', INTERVAL '1' DAY
+FROM dual
+WHERE name = :name`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.Oracle})
+	if err != nil {
+		t.Fatalf("oracle basics: %v", err)
+	}
+	fmt.Println(res.Digest)
+	fmt.Println(res.Params)
+	// :id, 'x', DATE '...', INTERVAL '1'（单位 DAY 会出现在 digest 里，不参数化）, :name
+	assertDigestHas(t, res.Digest, []string{"SELECT", "FROM", "WHERE", "DAY"})
+	assertParamCount(t, sql, res, 5)
+}
+
+func Test_Oracle_QQuote_Strings(t *testing.T) {
+	sql := `SELECT q'[a 'b' c]', q'{中}文', q'@x@y@' FROM dual`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.Oracle})
+	if err != nil {
+		t.Fatalf("oracle q-quote: %v", err)
+	}
+	assertDigestHas(t, res.Digest, []string{"SELECT", "FROM"})
+	assertParamCount(t, sql, res, 3)
+}
+
+func Test_Oracle_Insert_Single(t *testing.T) {
+	sql := `INSERT INTO orders (id, uid, amt, note, created_at)
+VALUES (101, :u1, 9.99, q'[首单]', DATE '2020-01-01')`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.Oracle})
+	if err != nil {
+		t.Fatalf("oracle insert single: %v", err)
+	}
+	// 101, :u1, 9.99, q'[...]', DATE '...' → 5 个
+	assertDigestHas(t, res.Digest, []string{"INSERT", "INTO", "VALUES"})
+	assertParamCount(t, sql, res, 5)
+}
+
+func Test_Oracle_InsertAll_MultiRows(t *testing.T) {
+	sql := `INSERT ALL
+  INTO orders (id, uid, amt, note) VALUES (102, :u2, 15.50, '第二单')
+  INTO orders (id, uid, amt, note) VALUES (103, :u3, 0.00, '免运费')
+SELECT 1 FROM dual`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.Oracle})
+	if err != nil {
+		t.Fatalf("oracle insert all: %v", err)
+	}
+	fmt.Println(res.Digest)
+	fmt.Println(res.Params)
+	// 两条 INTO 各 4 个 → 8 个参数（注意 '第二单'/'免运费' 也参数化）
+	assertDigestHas(t, res.Digest, []string{"INSERT", "ALL", "SELECT", "FROM"})
+	assertParamCount(t, sql, res, 9)
+}
+
+func Test_Oracle_Update_Returning(t *testing.T) {
+	sql := `UPDATE orders
+SET amt = :amt
+WHERE id = :id
+RETURNING note INTO :note`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.Oracle})
+	if err != nil {
+		t.Fatalf("oracle update returning: %v", err)
+	}
+	// :amt, :id, :note → 3 个（RETURNING INTO 的 :note 也是命名绑定）
+	assertDigestHas(t, res.Digest, []string{"UPDATE", "RETURNING", "INTO"})
+	assertParamCount(t, sql, res, 3)
+}
+
+func Test_Oracle_Delete_Returning(t *testing.T) {
+	sql := `DELETE FROM orders WHERE id = :id RETURNING note, amt INTO :n, :a`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.Oracle})
+	if err != nil {
+		t.Fatalf("oracle delete returning: %v", err)
+	}
+	assertDigestHas(t, res.Digest, []string{"DELETE", "FROM", "RETURNING", "INTO"})
+	assertParamCount(t, sql, res, 3) // :id, :n, :a
+}
+
+func Test_Oracle_Merge_Into(t *testing.T) {
+	sql := `MERGE INTO tgt t
+USING (SELECT :id AS id, :val AS val FROM dual) s
+ON (t.id = s.id)
+WHEN MATCHED THEN UPDATE SET t.val = s.val
+WHEN NOT MATCHED THEN INSERT (id, val) VALUES (s.id, s.val)`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.Oracle})
+	if err != nil {
+		t.Fatalf("oracle merge: %v", err)
+	}
+	assertDigestHas(t, res.Digest, []string{"MERGE", "INTO", "USING", "WHEN", "UPDATE", "INSERT"})
+	assertParamCount(t, sql, res, 2) // :id, :val
+}
+
+func Test_Oracle_Sequence_Nextval(t *testing.T) {
+	sql := `INSERT INTO t(id, val) VALUES (seq_orders.NEXTVAL, :v)`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.Oracle})
+	if err != nil {
+		t.Fatalf("oracle seq nextval: %v", err)
+	}
+	assertDigestHas(t, res.Digest, []string{"INSERT", "VALUES", "NEXTVAL"})
+	assertParamCount(t, sql, res, 1) // 只有 :v
+}
+
+func Test_Oracle_ConnectBy_Prior(t *testing.T) {
+	sql := `SELECT LEVEL, SYS_CONNECT_BY_PATH(name, '/')
+FROM cats
+START WITH parent_id IS NULL
+CONNECT BY PRIOR id = parent_id AND LEVEL < :n`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.Oracle})
+	if err != nil {
+		t.Fatalf("oracle connect by: %v", err)
+	}
+	// 参数：'/' 字面量 + :n
+	assertDigestHas(t, res.Digest, []string{"CONNECT", "BY", "PRIOR", "START", "WITH"})
+	assertParamCount(t, sql, res, 2)
+}
+
+func Test_Oracle_OuterJoin_Legacy(t *testing.T) {
+	sql := `SELECT * FROM emp e, dept d
+WHERE e.deptno = d.deptno(+)
+AND e.ename LIKE :pat`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.Oracle})
+	if err != nil {
+		t.Fatalf("oracle legacy outer join: %v", err)
+	}
+	assertDigestHas(t, res.Digest, []string{"SELECT", "WHERE", "(+)"})
+	assertParamCount(t, sql, res, 1)
+}
+
+func Test_Oracle_Analytic_DateLiteral(t *testing.T) {
+	sql := `SELECT deptno,
+       SUM(sal) OVER (PARTITION BY deptno ORDER BY empno
+                      ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS s
+FROM emp
+WHERE hiredate < DATE '2020-01-01'`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.Oracle})
+	if err != nil {
+		t.Fatalf("oracle analytic: %v", err)
+	}
+	assertDigestHas(t, res.Digest, []string{"OVER", "PARTITION", "ROWS", "BETWEEN"})
+	assertParamCount(t, sql, res, 1) // DATE '...'
+}
+
+func Test_Oracle_TimeFuncs_ParamizeOff_Default(t *testing.T) {
+	sql := `SELECT SYSDATE, SYSTIMESTAMP FROM dual`
+	// 默认 ParamizeTimeFuncs=false，不把时间函数当参数
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.Oracle})
+	if err != nil {
+		t.Fatalf("oracle time funcs off: %v", err)
+	}
+	assertDigestHas(t, res.Digest, []string{"SYSDATE", "SYSTIMESTAMP"})
+	assertParamCount(t, sql, res, 0)
+}
+
+func Test_Oracle_TimeFuncs_ParamizeOn(t *testing.T) {
+	sql := `SELECT SYSDATE, SYSTIMESTAMP, CURRENT_DATE FROM dual`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.Oracle, ParamizeTimeFuncs: true})
+	if err != nil {
+		t.Fatalf("oracle time funcs on: %v", err)
+	}
+	// 三个都应被参数化
+	assertDigestHas(t, res.Digest, []string{"SELECT", "FROM"})
+	assertParamCount(t, sql, res, 3)
+}
+
+func Test_Oracle_Update_With_Subquery_And_In(t *testing.T) {
+	sql := `UPDATE t SET val = (SELECT MAX(x) FROM s WHERE s.k = t.k)
+WHERE id IN (:a, :b, :c)`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.Oracle})
+	if err != nil {
+		t.Fatalf("oracle update subquery: %v", err)
+	}
+	assertDigestHas(t, res.Digest, []string{"UPDATE", "IN"})
+	assertParamCount(t, sql, res, 3)
+}
+
+func Test_Oracle_Malformed_ExtraParen_Sanitized(t *testing.T) {
+	sql := `SELECT (1+1)) FROM dual; SELECT 1 FROM dual`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.Oracle})
+	if err != nil {
+		t.Fatalf("oracle malformed paren: %v", err)
+	}
+	// 最终 digest 不应出现尾部多余的 ')'
+	if strings.HasSuffix(strings.TrimSpace(res.Digest), ")") {
+		t.Fatalf("digest should not end with ')': %q", res.Digest)
+	}
+}
+
 /************** helpers **************/
 
 func assertDigestHas(t *testing.T, digest string, kws []string) {
