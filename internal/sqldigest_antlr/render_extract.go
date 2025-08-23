@@ -8,6 +8,8 @@ import (
 	"github.com/antlr4-go/antlr/v4"
 )
 
+var reDollarTag = regexp.MustCompile(`^\$[A-Za-z_0-9]*\$$`)
+
 // 常见多字符操作符
 var multiOp = map[string]struct{}{
 	">=": {}, "<=": {}, "<>": {}, "!=": {},
@@ -125,6 +127,39 @@ func renderAndExtract(original string, toks []antlr.Token, opt Options) (string,
 				iParam++
 				out.WriteString("?")
 				i = j
+				prevWord = ""
+				continue
+			}
+		}
+
+		if reDollarTag.MatchString(text) {
+			// 从当前 token 向后找到相同的 $tag$
+			endIdx := -1
+			for j := i + 1; j < len(toks); j++ {
+				tj := toks[j]
+				if isEOFToken(tj) {
+					break
+				}
+				if tj == nil || tj.GetChannel() != antlr.TokenDefaultChannel {
+					continue
+				}
+				if tj.GetText() == text {
+					endIdx = j
+					break
+				}
+			}
+			if endIdx != -1 {
+				needSpaceBeforeWord()
+				startByte := runeIndexToByte(original, t.GetStart())
+				endByte := runeIndexToByte(original, toks[endIdx].GetStop()+1)
+				params = append(params, ExParam{
+					Index: iParam, Type: "String",
+					Value: original[startByte:endByte],
+					Start: startByte, End: endByte,
+				})
+				iParam++
+				out.WriteString("?")
+				i = endIdx // 跳到结尾 $tag$
 				prevWord = ""
 				continue
 			}
