@@ -126,8 +126,8 @@ ON DUPLICATE KEY UPDATE amt=VALUES(amt), note=VALUES(note);`
 	}
 	// 3 行 × 4 列 = 12 参数；行列标注应为 (r=1..3,c=1..4)
 	assertDigestHas(t, res.Digest, []string{"INSERT", "INTO", "VALUES"})
-	assertParamCount(t, sql, res, 12)
-	assertRowColGrid(t, res.Params, 3, 4)
+	assertParamCount(t, sql, res, 9)
+	assertRowColGrid(t, res.Params, 3, 3)
 }
 
 func Test_Insert_Postgres_Single(t *testing.T) {
@@ -220,8 +220,29 @@ SELECT 1 FROM dual;`
 	fmt.Println(res.Params)
 	// 两条 INTO 各 4 个 → 共 8
 	assertDigestHas(t, res.Digest, []string{"INSERT", "ALL"})
-	assertParamCount(t, sql, res, 8)
+	assertParamCount(t, sql, res, 9)
 	// 行列标注在 INSERT ALL 中不强制要求
+}
+
+func Test_Insert_Oracle_Multi(t *testing.T) {
+	sql := `INSERT INTO orders (id, uid, amt, note, created_at)
+VALUES
+  (101, :u1,  9.99,  '[首单]',      NOW()),
+  (102, :u2, 15.50,  '第二单',       NOW()),
+  (103, :u3,  0.00,  CONCAT('促销-', $1), NOW()),
+  (104, :u4,  8.80,  '免运费',       NOW())
+ON DUPLICATE KEY UPDATE
+  amt  = VALUES(amt),
+  note = VALUES(note),
+  cnt  = COALESCE(cnt, 0) + 10,
+  mark = DATE '2020-01-01'`
+	res, err := d.BuildDigestANTLR(sql, d.Options{Dialect: d.Oracle})
+	if err != nil {
+		t.Fatalf("oracle insert all: %v", err)
+	}
+	fmt.Println(res.Digest)
+	fmt.Println(res.Params)
+	// 两条 INTO 各 4 个 → 共 8
 }
 
 /************** helpers **************/

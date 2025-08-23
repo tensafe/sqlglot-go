@@ -118,7 +118,7 @@ func annotateInsertRowCol(original string, dialect Dialect, params *[]ExParam) {
 	default:
 		lexer = mylex.NewMySQLLexer(is)
 	}
-	
+
 	toks := antlr.NewCommonTokenStream(lexer, 0)
 	toks.Fill()
 	all := toks.GetAllTokens()
