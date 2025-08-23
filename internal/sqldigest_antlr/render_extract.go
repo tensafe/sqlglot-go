@@ -49,94 +49,60 @@ var timeFuncs = map[string]string{
 	"SYSTIMESTAMP": "Timestamp",
 }
 
+// —— 非函数关键字（即便后面带 "(" 也不是“函数”）——
+var nonFuncHeads = map[string]struct{}{
+	"VALUES": {}, "SELECT": {}, "FROM": {}, "WHERE": {}, "GROUP": {}, "ORDER": {},
+	"LIMIT": {}, "OFFSET": {}, "HAVING": {}, "JOIN": {}, "LEFT": {}, "RIGHT": {},
+	"FULL": {}, "INNER": {}, "OUTER": {}, "CROSS": {}, "UNION": {}, "EXCEPT": {},
+	"INTERSECT": {}, "INSERT": {}, "UPDATE": {}, "DELETE": {}, "MERGE": {}, "INTO": {},
+	"SET": {}, "ON": {}, "USING": {}, "RETURNING": {}, "WITH": {}, "OVER": {},
+}
+
 // ---- 小工具 ----
 
 func IsEOFToken(t antlr.Token) bool {
 	return t == nil || t.GetTokenType() == antlr.TokenEOF || t.GetText() == "<EOF>"
 }
 
-// 扫描任意 VALUES 段，若元组里出现绑定占位符（?/$n/:name/@p1）则返回 true
-func valuesSectionHasBind(toks []antlr.Token) bool {
-	inValues := false
-	depth := 0
-	for i := 0; i < len(toks); i++ {
-		t := toks[i]
-		if IsEOFToken(t) {
-			break
-		}
-		if t == nil || t.GetChannel() != antlr.TokenDefaultChannel {
-			continue
-		}
-		txt := t.GetText()
-		up := strings.ToUpper(txt)
-
-		if up == "VALUES" {
-			inValues = true
-			depth = 0
-			continue
-		}
-		if !inValues {
-			continue
-		}
-
-		switch txt {
-		case "(":
-			depth++
-			continue
-		case ")":
-			if depth > 0 {
-				depth--
-			}
-			continue
-		}
-		if depth > 0 && isBind(txt) {
-			return true
-		}
+func looksLikeIdent(s string) bool {
+	if s == "" {
+		return false
+	}
+	// 简单判定：首字符字母/下划线，或带引号的标识符
+	if isQuotedIdent(s) {
+		return true
+	}
+	r, _ := utf8.DecodeRuneInString(s)
+	if r == '_' || ('A' <= r && r <= 'Z') || ('a' <= r && r <= 'z') {
+		return true
 	}
 	return false
 }
 
-// 扫描任意 VALUES 段，若元组里出现时间函数（ParamizeTimeFuncs=true 时视作变量）则返回 true
-func valuesSectionHasTimeFunc(toks []antlr.Token) bool {
-	inValues := false
-	depth := 0
-	for i := 0; i < len(toks); i++ {
-		t := toks[i]
-		if IsEOFToken(t) {
-			break
-		}
-		if t == nil || t.GetChannel() != antlr.TokenDefaultChannel {
-			continue
-		}
-		txt := t.GetText()
-		up := strings.ToUpper(txt)
-
-		if up == "VALUES" {
-			inValues = true
-			depth = 0
-			continue
-		}
-		if !inValues {
-			continue
-		}
-
-		switch txt {
-		case "(":
-			depth++
-			continue
-		case ")":
-			if depth > 0 {
-				depth--
-			}
-			continue
-		}
-		if depth > 0 {
-			if _, ok := timeFuncs[up]; ok {
-				return true
-			}
-		}
+func isQuotedIdent(s string) bool {
+	if s == "" {
+		return false
 	}
-	return false
+	switch s[0] {
+	case '`', '"', '[':
+		return true
+	default:
+		return false
+	}
+}
+
+// 将 antlr 的 rune 索引用到 UTF-8 字节索引
+func RuneIndexToByte(s string, runeIdx int) int {
+	if runeIdx <= 0 {
+		return 0
+	}
+	i := 0
+	for pos := 0; pos < runeIdx && i < len(s); {
+		_, w := utf8.DecodeRuneInString(s[i:])
+		i += w
+		pos++
+	}
+	return i
 }
 
 // ---------- 注释区间扫描（MySQL 专用） ----------
@@ -244,6 +210,370 @@ func inAnySpan(startByte, endByte int, spans []span) bool {
 	return false
 }
 
+// 向后看一个“可见且非注释”的 token
+func nextVisibleWithComments(original string, toks []antlr.Token, i int, commentSpans []span) (antlr.Token, int) {
+	for j := i + 1; j < len(toks); j++ {
+		t := toks[j]
+		if IsEOFToken(t) || t.GetChannel() != antlr.TokenDefaultChannel {
+			continue
+		}
+		if IsWhitespace(t.GetText()) {
+			continue
+		}
+		if len(commentSpans) > 0 {
+			sb := RuneIndexToByte(original, t.GetStart())
+			eb := RuneIndexToByte(original, t.GetStop()+1)
+			if inAnySpan(sb, eb, commentSpans) {
+				continue
+			}
+		}
+		return t, j
+	}
+	return nil, i
+}
+
+// 向前看一个“可见且非注释”的 token
+func prevVisibleWithComments(original string, toks []antlr.Token, i int, commentSpans []span) (antlr.Token, int) {
+	for j := i - 1; j >= 0; j-- {
+		t := toks[j]
+		if IsEOFToken(t) || t.GetChannel() != antlr.TokenDefaultChannel {
+			continue
+		}
+		if IsWhitespace(t.GetText()) {
+			continue
+		}
+		if len(commentSpans) > 0 {
+			sb := RuneIndexToByte(original, t.GetStart())
+			eb := RuneIndexToByte(original, t.GetStop()+1)
+			if inAnySpan(sb, eb, commentSpans) {
+				continue
+			}
+		}
+		return t, j
+	}
+	return nil, i
+}
+
+// 判断当前标识符（索引 idx）是否处于 "INTO <schema.>table (" 这种“表名+列清单”上下文
+func isTableColumnListContext(original string, toks []antlr.Token, idx int, commentSpans []span) bool {
+	// 向前允许出现 . 和 标识符/带引号标识符；最终应该遇到 INTO
+	j := idx - 1
+	for j >= 0 {
+		t, k := prevVisibleWithComments(original, toks, j+1, commentSpans)
+		if t == nil {
+			break
+		}
+		txt := t.GetText()
+		up := strings.ToUpper(txt)
+		if up == "INTO" {
+			return true
+		}
+		// 允许 schema.qual
+		if txt == "." || looksLikeIdent(txt) || isQuotedIdent(txt) {
+			j = k - 1
+			continue
+		}
+		break
+	}
+	return false
+}
+
+// 扫描任意 VALUES 段，若元组里出现绑定占位符（?/$n/:name/@p1）则返回 true
+func valuesSectionHasBind(toks []antlr.Token) bool {
+	inValues := false
+	depth := 0
+	for i := 0; i < len(toks); i++ {
+		t := toks[i]
+		if IsEOFToken(t) {
+			break
+		}
+		if t == nil || t.GetChannel() != antlr.TokenDefaultChannel {
+			continue
+		}
+		txt := t.GetText()
+		up := strings.ToUpper(txt)
+
+		if up == "VALUES" {
+			inValues = true
+			depth = 0
+			continue
+		}
+		if !inValues {
+			continue
+		}
+
+		switch txt {
+		case "(":
+			depth++
+			continue
+		case ")":
+			if depth > 0 {
+				depth--
+			}
+			continue
+		}
+		if depth > 0 && isBind(txt) {
+			return true
+		}
+	}
+	return false
+}
+
+// —— 检测各元组“值头部”是否兼容 ——
+// 仅当：所有元组长度一致、且每列在所有元组里都“可折叠”为同一占位模式时返回 true。
+// 当 paramizeFuncs==true：L(字面量)/B(绑定)/F(任意函数) 都视为可参数化占位 "P"；只要不是复杂表达式 O 就可折叠。
+// 当 paramizeFuncs==false：L 必须对齐为 L；B 不会出现（前面已禁止 binds 折叠）；F 必须同名；遇到 O 不折叠。
+func valuesFunctionsConsistent(original string, toks []antlr.Token, commentSpans []span, paramizeFuncs bool) bool {
+	type tupleHeads []string
+	var all []tupleHeads
+
+	inValues := false
+	for i := 0; i < len(toks); i++ {
+		t := toks[i]
+		if IsEOFToken(t) || t.GetChannel() != antlr.TokenDefaultChannel || IsWhitespace(t.GetText()) {
+			continue
+		}
+		if strings.EqualFold(t.GetText(), "VALUES") {
+			inValues = true
+			continue
+		}
+		if !inValues || t.GetText() != "(" {
+			continue
+		}
+
+		// 扫描一个顶层元组
+		heads := tupleHeads{}
+		j := i + 1
+		for j < len(toks) {
+			// 找当前值的“头部标签”
+			h, nxt := classifyValueHead(original, toks, j, commentSpans, paramizeFuncs)
+			if h == "" {
+				h = "O"
+			}
+			heads = append(heads, h)
+
+			// 跳到这个值结束（顶层逗号或元组右括号）
+			k := nxt
+			depth := 1
+			for ; k < len(toks); k++ {
+				tk := toks[k]
+				if tk == nil || tk.GetChannel() != antlr.TokenDefaultChannel {
+					continue
+				}
+				w := tk.GetText()
+				if w == "(" {
+					depth++
+				} else if w == ")" {
+					depth--
+					if depth == 0 {
+						break
+					}
+				} else if w == "," && depth == 1 {
+					k++
+					break
+				}
+			}
+			if k >= len(toks) {
+				break
+			}
+			// 元组结束
+			if depth == 0 {
+				j = k + 1
+				break
+			}
+			// 下一个值
+			j = k
+		}
+		all = append(all, heads)
+		i = j - 1
+	}
+
+	if len(all) <= 1 {
+		return true
+	}
+	// 长度一致
+	l := len(all[0])
+	for _, h := range all {
+		if len(h) != l {
+			return false
+		}
+	}
+	// 列对列检查
+	for c := 0; c < l; c++ {
+		base := all[0][c]
+		for r := 1; r < len(all); r++ {
+			cur := all[r][c]
+			// 任何一方是复杂表达式 O -> 不折叠
+			if base == "O" || cur == "O" {
+				return false
+			}
+			if paramizeFuncs {
+				// 参数化模式：P(可参数化，占位) 之间都兼容
+				if !((base == "P" || base == "L") && (cur == "P" || cur == "L")) &&
+					!(base == "B" && cur == "B") {
+					// 保险起见，只要不是 O，都归一成 P，这里也可以简单：
+					// 继续下一列（等价于允许）
+				}
+				// 直接允许（因为 L/B/F 都会被渲染为 "?"）
+				continue
+			}
+
+			// 非参数化函数模式：要求同类
+			// 1) 字面量必须对齐为 L
+			if base == "L" && cur == "L" {
+				continue
+			}
+			// 2) 函数：必须同名（形如 F:NAME）
+			if strings.HasPrefix(base, "F:") && strings.HasPrefix(cur, "F:") && base == cur {
+				continue
+			}
+			// 其它组合 -> 不折叠
+			return false
+		}
+	}
+	return true
+}
+
+func splitHead(h string) (kind, fn string) {
+	if strings.HasPrefix(h, "F:") {
+		return "F", strings.TrimPrefix(h, "F:")
+	}
+	switch h {
+	case "L", "B", "O":
+		return h, ""
+	default:
+		return "O", ""
+	}
+}
+
+// 取一个值的“头部标签”及扫描到的索引（从 idx 开始，跳过空白/注释）
+// 返回 (head, nextIndex)
+// head: L/B/F:<NAME>/O
+// classifyValueHead 取一个值的“头部标签”和扫描到的索引
+// 当 paramizeFuncs=true 时：L/B/F 都归并为 "P"（可参数化占位）；复杂为 "O"
+func classifyValueHead(original string, toks []antlr.Token, idx int, commentSpans []span, paramizeFuncs bool) (string, int) {
+	// 跳过空白/注释
+	i := idx
+	for i < len(toks) {
+		t := toks[i]
+		if t == nil || t.GetChannel() != antlr.TokenDefaultChannel || IsWhitespace(t.GetText()) {
+			i++
+			continue
+		}
+		if len(commentSpans) > 0 {
+			sb := RuneIndexToByte(original, t.GetStart())
+			eb := RuneIndexToByte(original, t.GetStop()+1)
+			if inAnySpan(sb, eb, commentSpans) {
+				i++
+				continue
+			}
+		}
+		break
+	}
+	if i >= len(toks) {
+		return "", i
+	}
+	t := toks[i]
+	w := t.GetText()
+	up := strings.ToUpper(w)
+
+	// +/- 数字 -> 字面量
+	if w == "-" || w == "+" {
+		if nv, _ := nextVisibleWithComments(original, toks, i, commentSpans); nv != nil && isNumberLiteral(nv.GetText()) {
+			if paramizeFuncs {
+				return "P", i + 1
+			}
+			return "L", i + 1
+		}
+		return "O", i
+	}
+
+	// 字面量 / 绑定
+	if isNumberLiteral(w) || isStringLiteral(w) || reDollarTag.MatchString(w) {
+		if paramizeFuncs {
+			return "P", i + 1
+		}
+		return "L", i + 1
+	}
+	if isBind(w) {
+		if paramizeFuncs {
+			return "P", i + 1
+		}
+		return "B", i + 1
+	}
+	// DATE/TIME/TIMESTAMP/INTERVAL '...'
+	if ok, _ := isDateLike("", up, "X"); ok {
+		if nv, _ := nextVisibleWithComments(original, toks, i, commentSpans); nv != nil && isStringLiteral(nv.GetText()) {
+			if paramizeFuncs {
+				return "P", i + 1
+			}
+			return "L", i + 1
+		}
+	}
+
+	// 括号开头 -> 复杂
+	if w == "(" {
+		return "O", i
+	}
+
+	// 无括号时间关键字 -> 当作函数头
+	if _, isTime := timeFuncs[up]; isTime {
+		if nv, _ := nextVisibleWithComments(original, toks, i, commentSpans); nv == nil || nv.GetText() != "(" {
+			if paramizeFuncs {
+				return "P", i + 1
+			}
+			return "F:" + up, i + 1
+		}
+		// 有括号则走函数路径
+	}
+
+	// 标识符/限定名 + "(" 视作函数头；但 VALUES/INTO 等非函数关键字除外
+	if looksLikeIdent(w) || isQuotedIdent(w) {
+		headStart := i
+		headEnd := i
+		k := i
+		for {
+			tk := toks[k]
+			if tk == nil || tk.GetChannel() != antlr.TokenDefaultChannel {
+				break
+			}
+			word := tk.GetText()
+			if !looksLikeIdent(word) && !isQuotedIdent(word) {
+				break
+			}
+			headEnd = k
+			// schema.func
+			if nvDot, di := nextVisibleWithComments(original, toks, k, commentSpans); nvDot != nil && nvDot.GetText() == "." {
+				if nvWord, wi := nextVisibleWithComments(original, toks, di, commentSpans); nvWord != nil && (looksLikeIdent(nvWord.GetText()) || isQuotedIdent(nvWord.GetText())) {
+					k = wi
+					headEnd = k
+					continue
+				}
+			}
+			break
+		}
+		headUp := strings.ToUpper(toks[headStart].GetText())
+		if _, bad := nonFuncHeads[headUp]; bad {
+			return "O", headEnd + 1
+		}
+		if isTableColumnListContext(original, toks, headStart, commentSpans) {
+			return "O", headEnd + 1
+		}
+		if nv, _ := nextVisibleWithComments(original, toks, headEnd, commentSpans); nv != nil && nv.GetText() == "(" {
+			if paramizeFuncs {
+				return "P", headEnd + 1
+			}
+			// 非参数化：保留函数名（取最后一段）
+			nameTok := toks[headEnd]
+			name := strings.ToUpper(strings.Trim(nameTok.GetText(), "`\"[]"))
+			return "F:" + name, headEnd + 1
+		}
+		return "O", headEnd + 1
+	}
+
+	return "O", i + 1
+}
+
 // 主流程：把 token 流规范化渲染为 digest，并抽取参数
 func RenderAndExtract(original string, toks []antlr.Token, opt Options) (string, []ExParam) {
 	var out strings.Builder
@@ -259,14 +589,11 @@ func RenderAndExtract(original string, toks []antlr.Token, opt Options) (string,
 		commentSpans = findMySQLCommentSpans(original)
 	}
 
-	// INSERT…VALUES 折叠控制：仅当用户允许且 VALUES 段无绑定变量时才折叠
-	allowCollapseValues := opt.CollapseValuesInDigest && !valuesSectionHasBind(toks)
-	if allowCollapseValues && opt.ParamizeTimeFuncs {
-		// 时间函数也被视作“变量”时，VALUES 有时间函数则不折叠
-		if valuesSectionHasTimeFunc(toks) {
-			allowCollapseValues = false
-		}
-	}
+	// INSERT…VALUES 折叠控制（新增：考虑函数在参数化后的等价性）
+	allowCollapseValues := opt.CollapseValuesInDigest &&
+		!valuesSectionHasBind(toks) &&
+		valuesFunctionsConsistent(original, toks, commentSpans, opt.ParamizeTimeFuncs)
+
 	inValues := false    // 是否处于 VALUES 段
 	valsDepth := 0       // VALUES 内括号层级（仅在 inValues=true 时维护）
 	renderedTuples := 0  // 已渲染的顶层元组个数
@@ -324,31 +651,9 @@ func RenderAndExtract(original string, toks []antlr.Token, opt Options) (string,
 		out.WriteByte(' ')
 	}
 
-	// 获取下一个“可见且非空白”的 token
+	// 获取下一个“可见且非空白”的 token（同时跳过注释区）
 	nextVisible := func(i int) (antlr.Token, int) {
-		for j := i + 1; j < len(toks); j++ {
-			t := toks[j]
-			if IsEOFToken(t) {
-				return nil, i
-			}
-			if t.GetChannel() != antlr.TokenDefaultChannel {
-				continue
-			}
-			if IsWhitespace(t.GetText()) {
-				continue
-			}
-			// 注释过滤：下一个 token 若在注释区，继续往后找
-			if len(commentSpans) > 0 {
-				startByte := RuneIndexToByte(original, t.GetStart())
-				endByte := RuneIndexToByte(original, t.GetStop()+1)
-				if inAnySpan(startByte, endByte, commentSpans) {
-					i = j
-					continue
-				}
-			}
-			return t, j
-		}
-		return nil, i
+		return nextVisibleWithComments(original, toks, i, commentSpans)
 	}
 
 	for i := 0; i < len(toks); i++ {
@@ -408,6 +713,13 @@ func RenderAndExtract(original string, toks []antlr.Token, opt Options) (string,
 				if tj == nil || tj.GetChannel() != antlr.TokenDefaultChannel {
 					continue
 				}
+				if len(commentSpans) > 0 {
+					sb := RuneIndexToByte(original, tj.GetStart())
+					eb := RuneIndexToByte(original, tj.GetStop()+1)
+					if inAnySpan(sb, eb, commentSpans) {
+						continue
+					}
+				}
 				if tj.GetText() == text {
 					endIdx = j
 					break
@@ -432,21 +744,14 @@ func RenderAndExtract(original string, toks []antlr.Token, opt Options) (string,
 			}
 		}
 
-		// —— 时间函数作为参数（可选） ——（NOW(), GETDATE(), CURRENT_DATE 等）
-		// 只识别“局部安全模式”，避免跨越 tuple 边界。
+		// —— 时间关键字/时间函数参数化（安全形态） ——
 		if opt.ParamizeTimeFuncs {
 			up := strings.ToUpper(text)
 			kind, isTime := timeFuncs[up]
 			if isTime {
-				// helper: 取从 idx 开始的“下一个可见 token”
-				nextTok := func(idx int) (antlr.Token, int) {
-					return nextVisible(idx)
-				}
-
-				// 1) 无括号关键字
+				// 1) 无括号关键字：SYSDATE / CURRENT_DATE ...
 				if up == "SYSDATE" || up == "SYSTIMESTAMP" || up == "CURRENT_DATE" || up == "CURRENT_TIME" || up == "CURRENT_TIMESTAMP" {
-					nv1, _ := nextTok(i)
-					if nv1 == nil || nv1.GetText() != "(" {
+					if nv1, _ := nextVisible(i); nv1 == nil || nv1.GetText() != "(" {
 						needSpaceBeforeWord()
 						startByte := RuneIndexToByte(original, t.GetStart())
 						endByte := RuneIndexToByte(original, t.GetStop()+1)
@@ -463,10 +768,9 @@ func RenderAndExtract(original string, toks []antlr.Token, opt Options) (string,
 						continue
 					}
 				}
-
-				// 2) func() / func(3)
-				if nv1, idx1 := nextTok(i); nv1 != nil && nv1.GetText() == "(" {
-					if nv2, idx2 := nextTok(idx1); nv2 != nil {
+				// 2) func() / func(3)（仅“零参或单一数字精度”两种安全形态）
+				if nv1, idx1 := nextVisible(i); nv1 != nil && nv1.GetText() == "(" {
+					if nv2, idx2 := nextVisible(idx1); nv2 != nil {
 						// func()
 						if nv2.GetText() == ")" {
 							needSpaceBeforeWord()
@@ -487,7 +791,7 @@ func RenderAndExtract(original string, toks []antlr.Token, opt Options) (string,
 						}
 						// func(3)
 						if isNumberLiteral(nv2.GetText()) {
-							if nv3, idx3 := nextTok(idx2); nv3 != nil && nv3.GetText() == ")" {
+							if nv3, idx3 := nextVisible(idx2); nv3 != nil && nv3.GetText() == ")" {
 								needSpaceBeforeWord()
 								startByte := RuneIndexToByte(original, t.GetStart())
 								endByte := RuneIndexToByte(original, nv3.GetStop()+1)
@@ -505,6 +809,83 @@ func RenderAndExtract(original string, toks []antlr.Token, opt Options) (string,
 								continue
 							}
 						}
+					}
+				}
+			}
+		}
+
+		// —— 通用函数参数化（当 ParamizeTimeFuncs=true 时启用） ——
+		if opt.ParamizeTimeFuncs && looksLikeIdent(text) {
+			upHead := strings.ToUpper(text)
+			if _, bad := nonFuncHeads[upHead]; !bad && !isTableColumnListContext(original, toks, i, commentSpans) {
+				// 允许限定名：schema.func
+				nameEnd := i
+				k := i
+				for {
+					tk := toks[k]
+					if tk == nil || tk.GetChannel() != antlr.TokenDefaultChannel {
+						break
+					}
+					w := tk.GetText()
+					if !looksLikeIdent(w) && !isQuotedIdent(w) {
+						break
+					}
+					nameEnd = k
+					if nvDot, di := nextVisibleWithComments(original, toks, k, commentSpans); nvDot != nil && nvDot.GetText() == "." {
+						if nvWord, wi := nextVisibleWithComments(original, toks, di, commentSpans); nvWord != nil && (looksLikeIdent(nvWord.GetText()) || isQuotedIdent(nvWord.GetText())) {
+							k = wi
+							nameEnd = k
+							continue
+						}
+					}
+					break
+				}
+				// 必须紧跟 "("
+				if nv, parIdx := nextVisibleWithComments(original, toks, nameEnd, commentSpans); nv != nil && nv.GetText() == "(" {
+					depth := 1
+					endIdx := -1
+					for j := parIdx + 1; j < len(toks); j++ {
+						tj := toks[j]
+						if tj == nil || tj.GetChannel() != antlr.TokenDefaultChannel {
+							continue
+						}
+						if len(commentSpans) > 0 {
+							sb := RuneIndexToByte(original, tj.GetStart())
+							eb := RuneIndexToByte(original, tj.GetStop()+1)
+							if inAnySpan(sb, eb, commentSpans) {
+								continue
+							}
+						}
+						w := tj.GetText()
+						if w == "(" {
+							depth++
+						} else if w == ")" {
+							depth--
+							if depth == 0 {
+								endIdx = j
+								break
+							}
+						} else if w == ";" {
+							// 跨语句不合法
+							break
+						}
+					}
+					if endIdx != -1 {
+						needSpaceBeforeWord()
+						startByte := RuneIndexToByte(original, t.GetStart())
+						endByte := RuneIndexToByte(original, toks[endIdx].GetStop()+1)
+						params = append(params, ExParam{
+							Index: iParam, Type: "Func",
+							Value: original[startByte:endByte],
+							Start: startByte, End: endByte,
+						})
+						iParam++
+						if !suppressOut {
+							out.WriteString("?")
+						}
+						i = endIdx
+						prevWord = ""
+						continue
 					}
 				}
 			}
@@ -788,7 +1169,7 @@ func isDateLike(prevWord, curr, next string) (bool, string) {
 	return false, ""
 }
 
-// 下一个可见 token 的文本
+// 下一个可见 token 的文本（不考虑注释，供 isDateLike 的 peek 用）
 func peekText(toks []antlr.Token, i int) string {
 	for j := i; j < len(toks); j++ {
 		t := toks[j]
@@ -804,20 +1185,6 @@ func peekText(toks []antlr.Token, i int) string {
 		return t.GetText()
 	}
 	return ""
-}
-
-// 将 antlr 的 rune 索引用到 UTF-8 字节索引
-func RuneIndexToByte(s string, runeIdx int) int {
-	if runeIdx <= 0 {
-		return 0
-	}
-	i := 0
-	for pos := 0; pos < runeIdx && i < len(s); {
-		_, w := utf8.DecodeRuneInString(s[i:])
-		i += w
-		pos++
-	}
-	return i
 }
 
 // sanitizeParens 移除签名中“多余的右括号‘)’”。
