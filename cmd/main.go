@@ -9,11 +9,11 @@ import (
 // the <icon src="AllIcons.Actions.Execute"/> icon in the gutter and select the <b>Run</b> menu item from here.</p>
 
 func main() {
-	sql := `INSERT INTO t(a, ts) VALUES (1, NOW()), (2, NOW());`
+	sql := `INSERT INTO t(a, ts) VALUES (1, NOW()), (2, NOW1());`
 	dig, params, err := sqlglot.Signature(sql, sqlglot.Options{
 		Dialect:                sqlglot.MySQL,
-		CollapseValuesInDigest: true,
 		ParamizeTimeFuncs:      true,
+		CollapseValuesInDigest: true,
 	})
 	if err != nil {
 		return

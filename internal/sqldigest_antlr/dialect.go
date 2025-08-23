@@ -52,9 +52,9 @@ func BuildDigestANTLR(sql string, opt Options) (Result, error) {
 	if opt.Dialect == "" {
 		opt.Dialect = MySQL
 	}
-	if !opt.CollapseValuesInDigest {
-		opt.CollapseValuesInDigest = true
-	}
+	//if !opt.CollapseValuesInDigest {
+	//	opt.CollapseValuesInDigest = true
+	//}
 	// ANTLR 输入流（保留大小写）
 	is := antlr.NewInputStream(sql)
 

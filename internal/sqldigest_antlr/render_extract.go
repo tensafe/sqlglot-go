@@ -408,16 +408,9 @@ func valuesFunctionsConsistent(original string, toks []antlr.Token, commentSpans
 				return false
 			}
 			if paramizeFuncs {
-				// 参数化模式：P(可参数化，占位) 之间都兼容
-				if !((base == "P" || base == "L") && (cur == "P" || cur == "L")) &&
-					!(base == "B" && cur == "B") {
-					// 保险起见，只要不是 O，都归一成 P，这里也可以简单：
-					// 继续下一列（等价于允许）
-				}
-				// 直接允许（因为 L/B/F 都会被渲染为 "?"）
+				// 参数化模式：P(可参数化，占位) / L 都视为最终占位 "?"，因此兼容
 				continue
 			}
-
 			// 非参数化函数模式：要求同类
 			// 1) 字面量必须对齐为 L
 			if base == "L" && cur == "L" {
@@ -449,8 +442,7 @@ func splitHead(h string) (kind, fn string) {
 // 取一个值的“头部标签”及扫描到的索引（从 idx 开始，跳过空白/注释）
 // 返回 (head, nextIndex)
 // head: L/B/F:<NAME>/O
-// classifyValueHead 取一个值的“头部标签”和扫描到的索引
-// 当 paramizeFuncs=true 时：L/B/F 都归并为 "P"（可参数化占位）；复杂为 "O"
+// 当 paramizeFuncs=true：L/B/F 都归并为 "P"（可参数化占位）；复杂为 "O"
 func classifyValueHead(original string, toks []antlr.Token, idx int, commentSpans []span, paramizeFuncs bool) (string, int) {
 	// 跳过空白/注释
 	i := idx
@@ -589,10 +581,12 @@ func RenderAndExtract(original string, toks []antlr.Token, opt Options) (string,
 		commentSpans = findMySQLCommentSpans(original)
 	}
 
-	// INSERT…VALUES 折叠控制（新增：考虑函数在参数化后的等价性）
-	allowCollapseValues := opt.CollapseValuesInDigest &&
-		!valuesSectionHasBind(toks) &&
-		valuesFunctionsConsistent(original, toks, commentSpans, opt.ParamizeTimeFuncs)
+	// INSERT…VALUES 折叠控制（硬门禁 + 形状一致性）
+	allowCollapseValues := false
+	if opt.CollapseValuesInDigest {
+		allowCollapseValues = !valuesSectionHasBind(toks) &&
+			valuesFunctionsConsistent(original, toks, commentSpans, opt.ParamizeTimeFuncs)
+	}
 
 	inValues := false    // 是否处于 VALUES 段
 	valsDepth := 0       // VALUES 内括号层级（仅在 inValues=true 时维护）
@@ -930,8 +924,8 @@ func RenderAndExtract(original string, toks []antlr.Token, opt Options) (string,
 
 		switch text {
 		case ",":
-			// 在 VALUES 顶层且允许折叠时，跳过元组分隔逗号
 			if inValues && valsDepth == 0 && allowCollapseValues {
+				// 折叠时跳过元组分隔逗号
 				prevWord = ","
 				continue
 			}
@@ -949,7 +943,7 @@ func RenderAndExtract(original string, toks []antlr.Token, opt Options) (string,
 			continue
 
 		case "(":
-			parenDepth++ // 全局深度+1
+			parenDepth++
 
 			// 在 VALUES 段：顶层 "(" 表示一个新元组
 			if inValues && valsDepth == 0 {
@@ -957,12 +951,11 @@ func RenderAndExtract(original string, toks []antlr.Token, opt Options) (string,
 					// 第一个元组：正常渲染
 					suppressOut = false
 					renderedTuples = 1
-				} else if allowCollapseValues {
-					// 后续元组：只抽参，不渲染
-					suppressOut = true
+				} else {
+					// 后续元组：只有允许折叠时才抑制输出
+					suppressOut = allowCollapseValues
 				}
 			}
-			// 仅在 VALUES 段内维护元组深度
 			if inValues {
 				valsDepth++
 			}
@@ -989,11 +982,9 @@ func RenderAndExtract(original string, toks []antlr.Token, opt Options) (string,
 			if inValues && valsDepth > 0 {
 				valsDepth--
 				if valsDepth == 0 {
-					// 一个顶层元组结束；若后面不是逗号，则 VALUES 段结束
 					if nv, _ := nextVisible(i); nv == nil || nv.GetText() != "," {
 						inValues = false
 					}
-					// 元组结束后恢复渲染，便于输出后续子句
 					suppressOut = false
 				}
 			}
