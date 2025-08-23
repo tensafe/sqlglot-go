@@ -251,6 +251,11 @@ RETURNING e.id;`, 30+(i%60), 50+((i*7)%200))
 VALUES (%d, jsonb_build_object('k', %d))
 ON CONFLICT (uid) DO UPDATE SET js = prefs.js || EXCLUDED.js;`, 100+i, i%9)
 		}
+
+		var bindifyRatio = bindifyRatioFromEnv()
+		// 在 expandPGWithFuzz() 里，返回前对 sql 做：
+		sql = BindifySQL(sql, d.Postgres, bindifyRatio, r)
+
 		out = append(out, caseEntrye{
 			name:    fmt.Sprintf("PG_auto_%03d", i),
 			dialect: d.Postgres,
@@ -344,6 +349,11 @@ WHERE s.k BETWEEN %d AND %d;`, i, i, i+200)
 			sql = fmt.Sprintf(`REPLACE INTO prefs(uid, js)
 VALUES (%d, JSON_MERGE_PATCH(COALESCE((SELECT js FROM prefs WHERE uid=%d),'{}'), '{"mark":true}'));`, 100+i, 100+i)
 		}
+
+		var bindifyRatio = bindifyRatioFromEnv()
+		// 在 expandPGWithFuzz() 里，返回前对 sql 做：
+		sql = BindifySQL(sql, d.MySQL, bindifyRatio, r)
+
 		out = append(out, caseEntrye{
 			name:    fmt.Sprintf("My_auto_%03d", i),
 			dialect: d.MySQL,
@@ -351,6 +361,16 @@ VALUES (%d, JSON_MERGE_PATCH(COALESCE((SELECT js FROM prefs WHERE uid=%d),'{}'),
 		})
 	}
 	return out
+}
+
+// 读取替换比例（默认 0）
+func bindifyRatioFromEnv() float64 {
+	if v := os.Getenv("DML_BINDIFY"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f >= 0 && f <= 1 {
+			return f
+		}
+	}
+	return 0
 }
 
 func myValuesRowse(n, base int) string {
@@ -445,6 +465,10 @@ SET p.Json = JSON_MODIFY(p.Json, '$.touch', SYSUTCDATETIME()), p.Ver = p.Ver + 1
 FROM dbo.Profile p
 WHERE p.Uid = %d;`, 1000+i)
 		}
+		var bindifyRatio = bindifyRatioFromEnv()
+		// 在 expandPGWithFuzz() 里，返回前对 sql 做：
+		sql = BindifySQL(sql, d.SQLServer, bindifyRatio, r)
+
 		out = append(out, caseEntrye{
 			name:    fmt.Sprintf("MS_auto_%03d", i),
 			dialect: d.SQLServer,
@@ -522,6 +546,10 @@ FROM users u WHERE u.flag = MOD(%d, 3);`, i, i)
 			sql = fmt.Sprintf(`UPDATE prefs p SET p.js = JSON_MERGEPATCH(p.js, '{"touch":true}')
 WHERE p.uid = %d`, 3000+i)
 		}
+		var bindifyRatio = bindifyRatioFromEnv()
+		// 在 expandPGWithFuzz() 里，返回前对 sql 做：
+		sql = BindifySQL(sql, d.Oracle, bindifyRatio, r)
+
 		out = append(out, caseEntrye{
 			name:    fmt.Sprintf("OR_auto_%03d", i),
 			dialect: d.Oracle,
