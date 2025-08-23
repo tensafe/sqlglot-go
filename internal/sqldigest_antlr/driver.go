@@ -25,8 +25,9 @@ const (
 
 // Options 控制生成行为
 type Options struct {
-	Dialect           Dialect
-	ParamizeTimeFuncs bool // 是否把 NOW()/CURRENT_DATE 等也参数化（默认 false）
+	Dialect                Dialect
+	ParamizeTimeFuncs      bool // 是否把 NOW()/CURRENT_DATE 等也参数化（默认 false）
+	CollapseValuesInDigest bool
 }
 
 // ExParam 抽取到的参数
@@ -59,6 +60,9 @@ type Result struct {
 func BuildDigestANTLR(sql string, opt Options) (Result, error) {
 	if opt.Dialect == "" {
 		opt.Dialect = MySQL
+	}
+	if !opt.CollapseValuesInDigest {
+		opt.CollapseValuesInDigest = true
 	}
 	// ANTLR 输入流（保留大小写）
 	is := antlr.NewInputStream(sql)
