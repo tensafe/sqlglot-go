@@ -8,12 +8,13 @@ import (
 // Signature normalizes SQL into a stable digest and extracts parameters.
 // This mirrors sqlglot's top-level convenience APIs (parse/transpile/normalize),
 // but focuses on digest/params which your engine specializes in.
-func Signature(sql string, opt Options) (digest string, params []ExParam, err error) {
+func Signature(sql string, opt Options) (digest string, params []ExParam, types []string, err error) {
 	res, err := core.BuildDigestANTLR(sql, opt)
 	if err != nil {
-		return "", nil, err
+		return "", nil, nil, err
 	}
-	return res.Digest, res.Params, nil
+
+	return res.Digest, res.Params, res.SQLType, nil
 }
 
 // ExtractParams returns only the parameters discovered in SQL.

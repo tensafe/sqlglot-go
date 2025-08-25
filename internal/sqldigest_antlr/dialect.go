@@ -1,6 +1,8 @@
 package sqldigest_antlr
 
 import (
+	"crypto/md5"
+	"encoding/hex"
 	"fmt"
 	ollex "github.com/tensafe/sqlglot-go/internal/parsers/plsql"
 	"sort"
@@ -31,11 +33,12 @@ type Options struct {
 }
 
 type ExParam struct {
-	Index int
-	Type  string
-	Value string
-	Start int
-	End   int
+	Index     int
+	IndexHash string
+	Type      string
+	Value     string
+	Start     int
+	End       int
 	// 新增：INSERT ... VALUES (...) , (...), ... 的行/列位置（1-based）
 	Row int // 第几行 VALUES 元组
 	Col int // 该行里的第几个参数（按出现顺序）
@@ -43,8 +46,28 @@ type ExParam struct {
 
 // Result 产物
 type Result struct {
-	Digest string
-	Params []ExParam
+	Digest  string    `json:"digest,omitempty"`
+	Params  []ExParam `json:"params,omitempty"`
+	SQLType []string  `json:"sql_type,omitempty"` // 新增：按多语句返回每条类型
+}
+
+func MD5Prefix4(v interface{}) string {
+	var s string
+	switch val := v.(type) {
+	case string:
+		s = val
+	case int, int8, int16, int32, int64:
+		s = fmt.Sprintf("%d", val)
+	case uint, uint8, uint16, uint32, uint64:
+		s = fmt.Sprintf("%d", val)
+	case float32, float64:
+		s = fmt.Sprintf("%f", val)
+	default:
+		s = fmt.Sprintf("%v", val) // 兜底处理
+	}
+
+	h := md5.Sum([]byte(s))
+	return hex.EncodeToString(h[:])[:4]
 }
 
 // BuildDigestANTLR：用 ANTLR 词法 token 流做“字面量/占位→? + 规范化渲染 + 抽参”
@@ -84,7 +107,29 @@ func BuildDigestANTLR(sql string, opt Options) (Result, error) {
 	digest, params := RenderAndExtract(sql, tokens.GetAllTokens(), opt)
 	// 新增：如是 INSERT ... VALUES(...)，为每个参数标上 Row/Col
 	annotateInsertRowCol(sql, opt.Dialect, &params)
-	return Result{Digest: digest, Params: params}, nil
+
+	for i, p := range params {
+		params[i].IndexHash = MD5Prefix4(p.Index)
+	}
+
+	// 新增：多语句类型收集
+	stmtInfos := SplitStatements(sql, tokens.GetAllTokens(), opt)
+	sqlTypes := make([]string, 0, len(stmtInfos))
+	for _, s := range stmtInfos {
+		sqlTypes = append(sqlTypes, s.Type)
+	}
+	// 如果啥都没识别出来（全空白），给个 UNKNOWN
+	if len(sqlTypes) == 0 {
+		sqlTypes = []string{"UNKNOWN"}
+	}
+
+	return Result{
+		Digest:  digest,
+		Params:  params,
+		SQLType: sqlTypes,
+	}, nil
+
+	//return Result{Digest: digest, Params: params}, nil
 }
 
 // annotateInsertRowCol：若是 INSERT ... VALUES (...) , (...) ...，给每个参数打上 Row/Col

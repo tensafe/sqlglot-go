@@ -38,7 +38,7 @@ import (
 
 func main() {
 	sql := `INSERT INTO t(a, ts) VALUES (1, NOW()), (2, NOW());`
-	dig, params, err := sqlglot.Signature(sql, sqlglot.Options{
+	dig, params,sqltypes, err := sqlglot.Signature(sql, sqlglot.Options{
 		Dialect:                sqlglot.MySQL,
 		CollapseValuesInDigest: true,  // digest collapses multi-row VALUES to one tuple
 		ParamizeTimeFuncs:      true,  // treat NOW()/CURRENT_DATE… as parameters
@@ -49,17 +49,19 @@ func main() {
 	for _, p := range params {
 		fmt.Printf("P#%d %-10s [%d,%d): %q\n", p.Index, p.Type, p.Start, p.End, p.Value)
 	}
+  fmt.Println("SqlTypes:", sqltypes)
 }
 ```
 
 Example output:
 
 ```
-Digest: INSERT INTO T(A, TS) VALUES(?, ?)
-P#1 Number     [31,32): "1"
-P#2 Timestamp  [34,39): "NOW()"
-P#3 Number     [43,44): "2"
-P#4 Timestamp  [46,51): "NOW()"
+Digest: INSERT INTO T(A, TS) VALUES(?, ?);
+P#1 Number     [29,30): "1"
+P#2 Timestamp  [32,37): "NOW()"
+P#3 Number     [41,42): "2"
+P#4 Timestamp  [44,49): "NOW()"
+SqlTypes: [INSERT]
 ```
 
 ---

@@ -29,22 +29,37 @@ import "github.com/tensafe/sqlglot-go/sqlglot"
 ## 快速上手
 
 ```go
-sql := `INSERT INTO t(a, ts) VALUES (1, NOW()), (2, NOW());`
-dig, params, err := sqlglot.Signature(sql, sqlglot.Options{
-  Dialect:                sqlglot.MySQL,
-  CollapseValuesInDigest: true,  // digest 中将多行 VALUES 折叠为一行
-  ParamizeTimeFuncs:      true,  // 将 NOW()/CURRENT_DATE… 视作参数
-})
+import (
+	"fmt"
+	"github.com/tensafe/sqlglot-go/sqlglot"
+)
+
+func main() {
+	sql := `INSERT INTO t(a, ts) VALUES (1, NOW()), (2, NOW());`
+	dig, params,sqltypes, err := sqlglot.Signature(sql, sqlglot.Options{
+		Dialect:                sqlglot.MySQL,
+		CollapseValuesInDigest: true,  // digest collapses multi-row VALUES to one tuple
+		ParamizeTimeFuncs:      true,  // treat NOW()/CURRENT_DATE… as parameters
+	})
+	if err != nil { panic(err) }
+
+	fmt.Println("Digest:", dig)
+	for _, p := range params {
+		fmt.Printf("P#%d %-10s [%d,%d): %q\n", p.Index, p.Type, p.Start, p.End, p.Value)
+	}
+  fmt.Println("SqlTypes:", sqltypes)
+}
 ```
 
 示例输出：
 
 ```
-Digest: INSERT INTO T(A, TS) VALUES(?, ?)
-P#1 Number     [31,32): "1"
-P#2 Timestamp  [34,39): "NOW()"
-P#3 Number     [43,44): "2"
-P#4 Timestamp  [46,51): "NOW()"
+Digest: INSERT INTO T(A, TS) VALUES(?, ?);
+P#1 Number     [29,30): "1"
+P#2 Timestamp  [32,37): "NOW()"
+P#3 Number     [41,42): "2"
+P#4 Timestamp  [44,49): "NOW()"
+SqlTypes: [INSERT]
 ```
 
 ---
@@ -53,7 +68,7 @@ P#4 Timestamp  [46,51): "NOW()"
 
 ```go
 // 顶层帮助函数：
-func Signature(sql string, opt Options) (digest string, params []ExParam, err error)
+func Signature(sql string, opt Options) (digest string, params []ExParam,sqltypes []string, err error)
 func ExtractParams(sql string, opt Options) ([]ExParam, error)
 func ResultFor(sql string, opt Options) (Result, error)
 
@@ -74,6 +89,7 @@ type Options struct {
 type Result struct {
   Digest string
   Params []ExParam // {Index, Type, Value, Start, End}，Start/End 为原 SQL 的字节偏移
+  SQLType []string
 }
 
 // 与 python/sqlglot 对齐的占位符（目前返回 ErrNotImplemented）：

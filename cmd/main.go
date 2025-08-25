@@ -5,23 +5,20 @@ import (
 	"github.com/tensafe/sqlglot-go/sqlglot"
 )
 
-//TIP <p>To run your code, right-click the code and select <b>Run</b>.</p> <p>Alternatively, click
-// the <icon src="AllIcons.Actions.Execute"/> icon in the gutter and select the <b>Run</b> menu item from here.</p>
-
 func main() {
-	sql := `INSERT INTO t(a, ts) VALUES (1, NOW()), (2, NOW1());`
-	dig, params, err := sqlglot.Signature(sql, sqlglot.Options{
+	sql := `INSERT INTO t(a, ts) VALUES (1, NOW()), (2, NOW());`
+	dig, params, sqltypes, err := sqlglot.Signature(sql, sqlglot.Options{
 		Dialect:                sqlglot.MySQL,
-		ParamizeTimeFuncs:      true,
-		CollapseValuesInDigest: true,
+		CollapseValuesInDigest: true, // digest collapses multi-row VALUES to one tuple
+		ParamizeTimeFuncs:      true, // treat NOW()/CURRENT_DATE… as parameters
 	})
 	if err != nil {
-		return
+		panic(err)
 	}
-	// dig / params 即可用于归一化与参数审计
-	//_ = dig
-	//_ = params
-	fmt.Println(dig)
-	fmt.Println(params)
-	return
+
+	fmt.Println("Digest:", dig)
+	for _, p := range params {
+		fmt.Printf("P#%d %-10s [%d,%d): %q\n", p.Index, p.Type, p.Start, p.End, p.Value)
+	}
+	fmt.Println("SqlTypes:", sqltypes)
 }

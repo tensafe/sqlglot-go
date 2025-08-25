@@ -91,14 +91,14 @@ func BenchmarkSignature_Parallel(b *testing.B) {
 			localIdx++
 
 			opt.Dialect = d
-			dig, params, err := Signature(s, opt)
+			dig, params, sqltypes, err := Signature(s, opt)
 			if err != nil {
 				b.Fatalf("Signature error: %v\nsql=%s", err, s)
 			}
 			// 防止被编译器优化掉
 			sinkDigest = dig
 			sinkParams = params
-			fmt.Println(sinkParams, sinkDigest)
+			fmt.Println(sinkParams, sinkDigest, sqltypes)
 		}
 	})
 }
@@ -110,12 +110,13 @@ func benchSignatureSet(b *testing.B, set []string, opt Options) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		sql := set[i%len(set)]
-		dig, params, err := Signature(sql, opt)
+		dig, params, sqltypes, err := Signature(sql, opt)
 		if err != nil {
 			b.Fatalf("Signature error: %v\nsql=%s", err, sql)
 		}
 		sinkDigest = dig
 		sinkParams = params
+		fmt.Println(sinkParams, sinkDigest, sqltypes)
 	}
 }
 
